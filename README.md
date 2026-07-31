@@ -40,9 +40,20 @@
 - **新增 API / 生图接口连接测试**：在设置页可直接测试对话接口与绘图接口的连通性。
 - 配套的界面与设置项调整。
 
+## 下载
+
+打包版见 [Releases](https://github.com/menglian001/RP-Hub-mod/releases/latest)：
+
+| 文件 | 说明 |
+|---|---|
+| [`RP-Hub_1.6_web.zip`](https://github.com/menglian001/RP-Hub-mod/releases/download/v1.6-mod/RP-Hub_1.6_web.zip) | 网页离线版。第三方库已本地化，解压后双击 `index.html`，断网可用 |
+| [`RP-Hub_1.6_mod.apk`](https://github.com/menglian001/RP-Hub-mod/releases/download/v1.6-mod/RP-Hub_1.6_mod.apk) | 安卓版（Capacitor 封装）。首次启动需联网加载 CDN 资源 |
+
+APK 使用自签名证书，安装时系统可能提示来源未知。
+
 ## 快速开始
 
-1. 下载本仓库 ZIP 并解压（`Code` → `Download ZIP`）。
+1. 下载本仓库 ZIP 并解压（`Code` → `Download ZIP`），或直接下载上方的网页离线版。
 2. 双击 `index.html`，用 Chrome / Edge / Firefox 打开。
 3. 进入**设置**，填入你自己的 API 节点、API Key 与模型名称。
 4. 在**角色管理**中导入角色卡或新建角色，即可开始对话。
@@ -52,6 +63,9 @@
 ```bash
 python3 -m http.server 8899
 ```
+
+仓库源码中的 `index.html` 通过 CDN 加载 Vue / Tailwind 等第三方库，**需要联网**。
+要离线使用请下载上方的 `RP-Hub_1.6_web.zip`，其中的库已全部本地化到 `assets/vendor/`。
 
 本项目不内置任何 API Key，所有配置保存在浏览器本地。
 
