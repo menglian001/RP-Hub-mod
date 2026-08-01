@@ -216,6 +216,17 @@ createApp({
 
         const imageGenMemoryCache = new Map();
         const imageGenInflight = new Map();
+        // 生图由 MutationObserver 异步驱动，不在 isGenerating 的生命周期内，
+        // 所以单独登记在飞请求的控制器，让中止按钮也能停掉它们。
+        const imageGenAbortControllers = new Set();
+        const abortAllImageGen = () => {
+            if (imageGenAbortControllers.size === 0) return false;
+            imageGenAbortControllers.forEach(controller => (
+                abortSafely(controller, 'Image generation cancelled by user')
+            ));
+            imageGenAbortControllers.clear();
+            return true;
+        };
         const hashForImageGen = (str) => {
             let hash = 5381;
             for (let i = 0; i < str.length; i++) hash = ((hash << 5) + hash + str.charCodeAt(i)) | 0;
@@ -228,7 +239,7 @@ createApp({
 
         // 优先要 base64：部分中转站的图片域名开了防盗链（带 Referer 直接 403），
         // 浏览器取 url 必然带 Referer，拿不到图；b64_json 内嵌在 JSON 里不受影响。
-        const postOpenAIImage = async (fullPrompt, responseFormat) => {
+        const postOpenAIImage = async (fullPrompt, responseFormat, signal) => {
             const apiKey = String(settings.imageGenKey || '').trim();
             const headers = { 'Content-Type': 'application/json' };
             if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
@@ -241,7 +252,8 @@ createApp({
                     n: 1,
                     size: getOpenAIImageSize(),
                     response_format: responseFormat
-                })
+                }),
+                signal
             });
             if (!response.ok) {
                 const detail = await response.text().catch(() => '');
@@ -260,13 +272,14 @@ createApp({
         const requestOpenAIImage = async (prompt, options = {}) => {
             const artists = options.withArtists === false ? '' : getImageGenArtists();
             const fullPrompt = [prompt, artists].map(part => String(part || '').trim()).filter(Boolean).join(', ');
+            const signal = options.signal;
             try {
-                return await postOpenAIImage(fullPrompt, 'b64_json');
+                return await postOpenAIImage(fullPrompt, 'b64_json', signal);
             } catch (error) {
                 // 少数服务不认 b64_json，只在这种参数错误上退回 url
                 const unsupported = error && error.status === 400 && /response_format|b64_json/i.test(String(error.detail || ''));
                 if (!unsupported) throw error;
-                return postOpenAIImage(fullPrompt, 'url');
+                return postOpenAIImage(fullPrompt, 'url', signal);
             }
         };
 
@@ -274,19 +287,24 @@ createApp({
             const key = imageGenCacheKey(prompt);
             if (imageGenMemoryCache.has(key)) return Promise.resolve(imageGenMemoryCache.get(key));
             if (imageGenInflight.has(key)) return imageGenInflight.get(key);
+            const controller = new AbortController();
+            imageGenAbortControllers.add(controller);
             const task = (async () => {
                 const stored = await getStoredValue(key).catch(() => undefined);
                 if (typeof stored === 'string' && stored) {
                     imageGenMemoryCache.set(key, stored);
                     return stored;
                 }
-                const url = await requestOpenAIImage(prompt);
+                const url = await requestOpenAIImage(prompt, { signal: controller.signal });
                 imageGenMemoryCache.set(key, url);
                 setStoredValue(key, url).catch(() => { });
                 return url;
             })();
             imageGenInflight.set(key, task);
-            task.catch(() => { }).finally(() => imageGenInflight.delete(key));
+            task.catch(() => { }).finally(() => {
+                imageGenInflight.delete(key);
+                imageGenAbortControllers.delete(controller);
+            });
             return task;
         };
 
@@ -310,6 +328,14 @@ createApp({
                 img.src = url;
                 img.alt = '生成图片';
             }).catch(error => {
+                // 用户主动中止不是失败：还原成未开始，这样下次重新渲染
+                // （翻聊天记录 / 重新生成）还能再次触发，不会永久留一张错误占位图。
+                if (error?.name === 'AbortError') {
+                    delete img.dataset.imagegenState;
+                    img.src = IMAGE_GEN_PLACEHOLDER_SRC;
+                    img.alt = '生成图片(已中止)';
+                    return;
+                }
                 img.dataset.imagegenState = 'error';
                 img.alt = `生图失败：${error.message || error}`;
                 console.error('[ImageGen] 生成失败:', error);
@@ -4816,6 +4842,10 @@ ${content}
             if (activeToolQueueAbortController) {
                 abortSafely(activeToolQueueAbortController, 'Generation cancelled by user');
             }
+            // 第三方生图（OpenAI 兼容模式）由 MutationObserver 异步驱动，
+            // 不在 abortController 的生命周期内，需要单独中止，
+            // 否则正文停了图片还会继续生成并回填。
+            abortAllImageGen();
             if (hasActiveToolInlineWork.value) {
                 markActiveToolInlineWorkCancelled();
             }
@@ -6442,9 +6472,19 @@ ${content}
                             throw new Error(formatApiErrorMessage(response.status, errorDetail));
                         }
 
-                        // Check Content-Type to determine if we should stream
-                        const contentType = response.headers.get('content-type');
-                        const isStream = settings.stream && contentType && contentType.includes('text/event-stream');
+                        // 是否按流式读取：不能只认 text/event-stream。
+                        // 部分中转/代理会把 SSE 响应的 Content-Type 改写成 text/plain、
+                        // application/octet-stream 或干脆不带，导致流式响应被当成整体响应读，
+                        // 表现为“开着流式输出却一次性出字”。
+                        // 真正的非流式响应一定是 application/json，因此改为反向排除，
+                        // 并在流式分支末尾对“误判为流式”的情况做兜底。
+                        const contentType = response.headers.get('content-type') || '';
+                        const canReadStream = !!(response.body && typeof response.body.getReader === 'function');
+                        const isStream = settings.stream
+                            && canReadStream
+                            && !contentType.includes('application/json');
+
+                        let fallbackRawText = null;
 
                         if (isStream) {
                             const reader = response.body.getReader();
@@ -6473,11 +6513,18 @@ ${content}
                                 applyPendingNativeReasoning();
                             };
 
+                            // 兜底统计：若整轮下来没解析出任何增量，说明这其实不是 SSE
+                            // （可能是被误判为流式的整体响应），交给下方非流式逻辑重新解析。
+                            let rawStreamText = '';
+                            let appliedDeltaCount = 0;
+
                             while (true) {
                                 const { done, value } = await reader.read();
                                 if (done) break;
 
-                                buffer += decoder.decode(value, { stream: true });
+                                const decodedChunk = decoder.decode(value, { stream: true });
+                                rawStreamText += decodedChunk;
+                                buffer += decodedChunk;
                                 const lines = buffer.split('\n');
                                 buffer = lines.pop();
 
@@ -6485,8 +6532,10 @@ ${content}
                                     const trimmedLine = line.trim();
                                     if (!trimmedLine) continue;
 
-                                    if (trimmedLine.startsWith('data: ')) {
-                                        const dataStr = trimmedLine.slice(6);
+                                    // 兼容 "data:{...}"（无空格）与 "data: {...}"，
+                                    // 部分服务端不按 SSE 规范补空格，硬编码 slice(6) 会导致消息完全空白。
+                                    if (trimmedLine.startsWith('data:')) {
+                                        const dataStr = trimmedLine.replace(/^data:\s*/, '');
                                         if (dataStr === '[DONE]') continue;
 
                                         try {
@@ -6497,6 +6546,8 @@ ${content}
 
                                             const choice = data.choices?.[0];
                                             if (!choice) continue;
+
+                                            appliedDeltaCount++;
 
                                             const delta = choice.delta || choice.message || {};
                                             const rawContent = delta.content || '';
@@ -6545,11 +6596,21 @@ ${content}
                                 }
                             }
                             flushNativeReasoning();
-                        } else {
+
+                            // 误判兜底：按流式读完却一个增量都没解析到，
+                            // 说明这实际不是 SSE（例如被放宽判定纳入的整体响应）。
+                            // 把已读到的原文交给下方逻辑重新整体解析，避免消息空白。
+                            if (appliedDeltaCount === 0) {
+                                fallbackRawText = rawStreamText;
+                                console.warn('[Stream] 未解析到任何流式增量，回退为整体解析');
+                            }
+                        }
+
+                        if (!isStream || fallbackRawText !== null) {
                             // Non-streaming response handling
                             // Compatibility Fix: Some APIs force return SSE format even if stream=false
                             // We read as text first to handle both valid JSON and "forced stream" text
-                            const rawText = await response.text();
+                            const rawText = fallbackRawText !== null ? fallbackRawText : await response.text();
                             let content = '';
 
                             try {
