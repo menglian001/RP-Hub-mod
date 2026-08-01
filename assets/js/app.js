@@ -200,7 +200,19 @@ createApp({
         ];
         // 等待生成时的占位图（保持竖向比例，避免布局跳动）
         // 注意：这里刻意不写 font-size= 这类形如查询参数的片段，避免被 URL 参数替换逻辑误伤
-        const IMAGE_GEN_PLACEHOLDER_SRC = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='448'><rect width='100%25' height='100%25' fill='%23f1f5f9'/><text x='50%25' y='50%25' text-anchor='middle' dominant-baseline='middle' fill='%2394a3b8' style='font-family:sans-serif;font-size:18px'>Generating...</text></svg>";
+        const createImageGenStatusSrc = (status, detail = '') => {
+            const isError = status === 'error';
+            const safeDetail = String(detail || '').replace(/\s+/g, ' ').trim().slice(0, 240);
+            const detailLines = safeDetail.match(/.{1,30}/g) || [];
+            const lines = isError ? ['生图失败', ...detailLines] : ['Generating'];
+            const textLines = lines.map((line, index) => (
+                `<tspan x="160" dy="${index === 0 ? 0 : 24}">${line.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[char]))}</tspan>`
+            )).join('');
+            const loadingDots = '<circle cx="145" cy="242" r="4" fill="#94a3b8"><animate attributeName="opacity" values="0.25;1;0.25" dur="1.2s" repeatCount="indefinite"/></circle><circle cx="160" cy="242" r="4" fill="#94a3b8"><animate attributeName="opacity" values="0.25;1;0.25" dur="1.2s" begin="0.2s" repeatCount="indefinite"/></circle><circle cx="175" cy="242" r="4" fill="#94a3b8"><animate attributeName="opacity" values="0.25;1;0.25" dur="1.2s" begin="0.4s" repeatCount="indefinite"/></circle>';
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="448"><rect width="100%" height="100%" fill="#f1f5f9"/><text x="160" y="${isError ? 190 : 218}" text-anchor="middle" fill="${isError ? '#dc2626' : '#64748b'}" font-family="sans-serif" font-size="${isError ? 14 : 18}" font-weight="${isError ? '600' : '400'}">${textLines}</text>${isError ? '' : loadingDots}</svg>`;
+            return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+        };
+        const IMAGE_GEN_PLACEHOLDER_SRC = createImageGenStatusSrc('loading');
 
         const getImageGenMode = () => {
             if (settings.imageGenMode === IMAGE_GEN_MODE_OPENAI) return IMAGE_GEN_MODE_OPENAI;
@@ -377,8 +389,10 @@ createApp({
                     img.alt = '生成图片(已中止)';
                     return;
                 }
+                const errorDetail = error && (error.detail || error.message) || error;
                 img.dataset.imagegenState = 'error';
-                img.alt = `生图失败：${error.message || error}`;
+                img.src = createImageGenStatusSrc('error', errorDetail);
+                img.alt = `生图失败：${String(errorDetail)}`;
                 console.error('[ImageGen] 生成失败:', error);
             });
         };
