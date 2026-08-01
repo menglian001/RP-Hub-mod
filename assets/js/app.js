@@ -291,12 +291,22 @@ createApp({
             '方图': '1024x1024', '2K方图': '1024x1024', '4K方图': '1024x1024'
         };
         const VERTEX_IMAGE_SIZE_MAP = {
-            '竖图': '1024x1536', '2K竖图': '2048x3072', '4K竖图': '4096x6144',
-            '横图': '1536x1024', '2K横图': '3072x2048', '4K横图': '6144x4096',
-            '方图': '1024x1024', '2K方图': '2048x2048', '4K方图': '4096x4096'
+            'vertex_2_3': '1024x1536',
+            'vertex_3_2': '1536x1024',
+            'vertex_1_1': '1024x1024',
+            'vertex_9_16': '1024x1820',
+            'vertex_16_9': '1820x1024'
+        };
+        const VERTEX_IMAGE_RATIO_MAP = {
+            'vertex_2_3': '2:3',
+            'vertex_3_2': '3:2',
+            'vertex_1_1': '1:1',
+            'vertex_9_16': '9:16',
+            'vertex_16_9': '16:9'
         };
         const getAgnesImageSize = () => AGNES_IMAGE_SIZE_MAP[settings.imageSize] || '1024x1024';
-        const getVertexImageSize = () => VERTEX_IMAGE_SIZE_MAP[settings.vertexImageSize || settings.imageSize] || '1024x1536';
+        const getVertexImageSize = () => VERTEX_IMAGE_SIZE_MAP[settings.vertexImageSize] || VERTEX_IMAGE_SIZE_MAP.vertex_2_3;
+        const getVertexImageRatio = () => VERTEX_IMAGE_RATIO_MAP[settings.vertexImageSize] || '2:3';
         const getImageGenArtists = () => cardUtils.getImageStyleArtists(settings.imageStyle, settings.customImageArtists);
         // 地址可能填到 /v1，也可能只填域名，甚至直接填到完整端点
         const getImageGenApiEndpoint = () => {
@@ -344,8 +354,8 @@ createApp({
                     prompt: fullPrompt,
                     size: getVertexImageSize(),
                     imageConfig: {
-                        aspectRatio: (settings.vertexImageSize || settings.imageSize).includes('竖图') ? '2:3' : (settings.vertexImageSize || settings.imageSize).includes('横图') ? '3:2' : '1:1',
-                        imageSize: (settings.vertexImageSize || settings.imageSize).startsWith('4K') ? '4K' : (settings.vertexImageSize || settings.imageSize).startsWith('2K') ? '2K' : '1K'
+                        aspectRatio: getVertexImageRatio(),
+                        imageSize: '1K'
                     },
                     response_format: responseFormat
                 };
@@ -1007,7 +1017,7 @@ createApp({
             vertexImageGenKey: '',
             vertexImageGenUrl: 'https://vertex-proxy-production-6eaa.up.railway.app/v1',
             vertexImageGenModel: 'gemini-3-pro-image',
-            vertexImageSize: '竖图',
+            vertexImageSize: 'vertex_2_3',
             agnesImageGenKey: '',
             agnesImageGenUrl: '',
             agnesImageGenModel: '',
@@ -1264,6 +1274,13 @@ createApp({
             { value: '4K竖图', label: '4K竖图(-25)' },
             { value: '4K横图', label: '4K横图(-25)' },
             { value: '4K方图', label: '4K方图(-25)' }
+        ];
+        const vertexImageSizeOptions = [
+            { value: 'vertex_2_3', label: '竖版 2:3（人物/立绘）' },
+            { value: 'vertex_3_2', label: '横版 3:2（场景/风景）' },
+            { value: 'vertex_1_1', label: '方形 1:1（头像/图标）' },
+            { value: 'vertex_9_16', label: '超长竖版 9:16（手机壁纸）' },
+            { value: 'vertex_16_9', label: '宽屏横版 16:9（电脑壁纸）' }
         ];
         const imageGenCountOptions = [1, 2, 3, 4, 5, 6].map(count => ({
             value: count,
@@ -12168,7 +12185,7 @@ ${memoryFragmentSection}
             showUpdateModal, updateCountdown, latestUpdate, closeUpdateModal, isUpdateScrolledToBottom, checkUpdateScroll, // Update Modal
             showConfirmModal, confirmMessage, modelMode, showNoMemoryNeededModal, // Export for template
             isGenerating, isRemoteGenerating, remoteEstimatedTime, isReceiving, isThinking, hasActiveToolInlineWork, isConversationBusy, activeToolContinuationMessageId, activeToolContinuationHasResponse, userInput, modelSearchQuery, activeModelTag, modelTags, characterSearchQuery, filteredModels, filteredCharacters,
-            user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, imageStyleOptions, imageSizeOptions, imageGenCountOptions, imageGenModeOptions, imageGenAvailableModels, imageGenModelsLoading, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
+            user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, imageStyleOptions, imageSizeOptions, vertexImageSizeOptions, imageGenCountOptions, imageGenModeOptions, imageGenAvailableModels, imageGenModelsLoading, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
             activeTools, activeToolAggressivenessOptions: ACTIVE_TOOL_AGGRESSIVENESS_OPTIONS, editingActiveTool, normalizeActiveTools, isWebActiveTool, isWorldInfoActiveTool, getWorldInfoAccessMode, canConfigureActiveToolResultCount, getActiveToolDisplayDescription, getActiveToolResultCountMin, getActiveToolResultCountMax,
             getToolCallModeText, hasThinkingOrTools, isMessageThinkingOrRunning, isThinkingSummaryOpen, toggleThinkingSummary, markThinkingSummaryDetailOpened, getTimelineSteps,
             chatRoundStats, conversationBodyLength, summaryCompressedBodyLength,
