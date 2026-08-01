@@ -157,12 +157,15 @@ createApp({
         const DEFAULT_IMAGE_GEN_PATH = '/generate?tag={prompt}&token={token}&model=nai-diffusion-4-5-full&artist={artist}&size={size}&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={negative}&nocache=0&noise_schedule=karras';
         const DEFAULT_IMAGE_GEN_NEGATIVE = '{{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}},awkward hand sign,weird hand gesture,contorted hand,unnatural finger pose,deformed hand gesture,{shaka},{hang loose},{{rock on}},{shaka sign}';
 
+        // GET 直链用官方现成服务，界面上不再暴露地址与路径；
+        // 自定义地址只对 OpenAI 兼容模式生效（这里用字面量判断，避免依赖后面才定义的常量）
+        const isOpenAIImageGenMode = () => settings.imageGenMode === 'openai';
         const getImageGenBaseUrl = () => (
-            String(settings.imageGenUrl || '').trim().replace(/\/+$/, '') || DEFAULT_IMAGE_GEN_BASE_URL
+            isOpenAIImageGenMode()
+                ? (String(settings.imageGenUrl || '').trim().replace(/\/+$/, '') || DEFAULT_IMAGE_GEN_BASE_URL)
+                : DEFAULT_IMAGE_GEN_BASE_URL
         );
-        const getImageGenPath = () => (
-            String(settings.imageGenPath || '').trim() || DEFAULT_IMAGE_GEN_PATH
-        );
+        const getImageGenPath = () => DEFAULT_IMAGE_GEN_PATH;
         const isDefaultImageGenService = () => getImageGenBaseUrl() === DEFAULT_IMAGE_GEN_BASE_URL;
         // 把占位符替换成实际参数，拼出最终图片地址。
         // 注意：prompt 传入的是正则替换用的 '$1'，需保持原样交由正则引擎处理。
@@ -2514,6 +2517,11 @@ createApp({
                 delete settings.renderLayerLimit;
                 settings.contextSize = MAX_CONTEXT_SIZE;
                 settings.stream = true;
+                // 早期版本打开弹窗会自动拉取默认服务的模型，可能把它的模型名存进设置；
+                // 没有填写自己的生图服务地址时，生图模型本就无意义，这里清掉遗留值。
+                if (!String(settings.imageGenUrl || '').trim()) {
+                    settings.imageGenModel = '';
+                }
                 normalizeActiveToolAggressivenessSettings();
 
                 const savedPresets = await getStoredValue('presets');
@@ -4630,6 +4638,12 @@ ${content}
         };
 
         const checkImageGenStatus = async () => {
+            // 没填密钥根本用不了生图，宽松探测会一直显示绿色，这里直接判为未连接
+            if (!String(settings.imageGenKey || '').trim()) {
+                imageGenStatus.value = 'error';
+                imageGenLatency.value = 0;
+                return;
+            }
             if (isOpenAIImageGen()) {
                 // OpenAI 兼容模式探测 /models，能拿到响应即视为连通
                 await checkConnectionStatus(imageGenStatus, imageGenLatency, 'Image API', signal => {
