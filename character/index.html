@@ -1769,7 +1769,9 @@
                                 ? (mainSettings.agnesImageGenKey || '')
                                 : mainSettings.imageGenMode === 'openai'
                                     ? (mainSettings.openaiImageGenKey || '')
-                                    : (mainSettings.imageGenKey || '');
+                                    : mainSettings.imageGenMode === 'vertex'
+                                        ? (mainSettings.vertexImageGenKey || '')
+                                        : (mainSettings.imageGenKey || '');
 
                             // Map imageStyle to avatarStyle (vertical -> default, r18 -> hentai)
                             if (mainSettings.imageStyle === 'r18') {

@@ -164,7 +164,8 @@ createApp({
         // 自定义地址只对 POST 类模式生效（这里用字面量判断，避免依赖后面才定义的常量）
         const isAgnesImageGenMode = () => settings.imageGenMode === 'agnes';
         const isOpenAIImageGenMode = () => settings.imageGenMode === 'openai';
-        const isPostImageGenMode = () => isOpenAIImageGenMode() || isAgnesImageGenMode();
+        const isVertexImageGenMode = () => settings.imageGenMode === 'vertex';
+        const isPostImageGenMode = () => isOpenAIImageGenMode() || isAgnesImageGenMode() || isVertexImageGenMode();
         const getImageGenProfile = () => {
             if (isAgnesImageGenMode()) {
                 return {
@@ -180,6 +181,13 @@ createApp({
                     model: String(settings.openaiImageGenModel || '').trim()
                 };
             }
+            if (isVertexImageGenMode()) {
+                return {
+                    key: String(settings.vertexImageGenKey || '').trim(),
+                    url: String(settings.vertexImageGenUrl || '').trim(),
+                    model: String(settings.vertexImageGenModel || 'gemini-3-pro-image').trim() || 'gemini-3-pro-image'
+                };
+            }
             return {
                 key: String(settings.imageGenKey || '').trim(),
                 url: '',
@@ -191,7 +199,8 @@ createApp({
             const profile = getImageGenProfile();
             const custom = profile.url.replace(/\/+$/, '');
             if (custom) return custom;
-            return isAgnesImageGenMode() ? AGNES_IMAGE_GEN_BASE_URL : DEFAULT_IMAGE_GEN_BASE_URL;
+            if (isAgnesImageGenMode()) return AGNES_IMAGE_GEN_BASE_URL;
+            return DEFAULT_IMAGE_GEN_BASE_URL;
         };
         const getImageGenPath = () => DEFAULT_IMAGE_GEN_PATH;
         const isDefaultImageGenService = () => getImageGenBaseUrl() === DEFAULT_IMAGE_GEN_BASE_URL;
@@ -216,10 +225,12 @@ createApp({
         const IMAGE_GEN_MODE_GET = 'get';
         const IMAGE_GEN_MODE_OPENAI = 'openai';
         const IMAGE_GEN_MODE_AGNES = 'agnes';
+        const IMAGE_GEN_MODE_VERTEX = 'vertex';
         const imageGenModeOptions = [
             { value: IMAGE_GEN_MODE_GET, label: 'GET 直链（图片地址即出图）' },
             { value: IMAGE_GEN_MODE_OPENAI, label: 'OpenAI 兼容（POST /images/generations）' },
-            { value: IMAGE_GEN_MODE_AGNES, label: 'Agnes（POST /v1/images/generations）' }
+            { value: IMAGE_GEN_MODE_AGNES, label: 'Agnes（POST /v1/images/generations）' },
+            { value: IMAGE_GEN_MODE_VERTEX, label: 'Vertex Gemini（gemini-3-pro-image）' }
         ];
         // 等待生成时的占位图（保持竖向比例，避免布局跳动）
         // 注意：这里刻意不写 font-size= 这类形如查询参数的片段，避免被 URL 参数替换逻辑误伤
@@ -247,16 +258,19 @@ createApp({
         const getImageGenMode = () => {
             if (settings.imageGenMode === IMAGE_GEN_MODE_OPENAI) return IMAGE_GEN_MODE_OPENAI;
             if (settings.imageGenMode === IMAGE_GEN_MODE_AGNES) return IMAGE_GEN_MODE_AGNES;
+            if (settings.imageGenMode === IMAGE_GEN_MODE_VERTEX) return IMAGE_GEN_MODE_VERTEX;
             return IMAGE_GEN_MODE_GET;
         };
         const isAgnesImageGen = () => getImageGenMode() === IMAGE_GEN_MODE_AGNES;
-        // 两种 POST 模式共用同一套占位图 + MutationObserver 回填通路
+        const isVertexImageGen = () => getImageGenMode() === IMAGE_GEN_MODE_VERTEX;
+        // POST 模式共用同一套占位图 + MutationObserver 回填通路
         const isOpenAIImageGen = () => getImageGenMode() !== IMAGE_GEN_MODE_GET;
         const getImageGenModel = () => getImageGenProfile().model;
         const getImageGenKey = () => getImageGenProfile().key;
         const getActiveImageGenKey = () => {
             if (isAgnesImageGenMode()) return settings.agnesImageGenKey;
             if (isOpenAIImageGenMode()) return settings.openaiImageGenKey;
+            if (isVertexImageGenMode()) return settings.vertexImageGenKey;
             return settings.imageGenKey;
         };
         const setActiveImageGenModel = (value) => {
@@ -276,7 +290,13 @@ createApp({
             '横图': '1024x768', '2K横图': '1024x768', '4K横图': '1024x768',
             '方图': '1024x1024', '2K方图': '1024x1024', '4K方图': '1024x1024'
         };
+        const VERTEX_IMAGE_SIZE_MAP = {
+            '竖图': '1024x1536', '2K竖图': '2048x3072', '4K竖图': '4096x6144',
+            '横图': '1536x1024', '2K横图': '3072x2048', '4K横图': '6144x4096',
+            '方图': '1024x1024', '2K方图': '2048x2048', '4K方图': '4096x4096'
+        };
         const getAgnesImageSize = () => AGNES_IMAGE_SIZE_MAP[settings.imageSize] || '1024x1024';
+        const getVertexImageSize = () => VERTEX_IMAGE_SIZE_MAP[settings.vertexImageSize || settings.imageSize] || '1024x1536';
         const getImageGenArtists = () => cardUtils.getImageStyleArtists(settings.imageStyle, settings.customImageArtists);
         // 地址可能填到 /v1，也可能只填域名，甚至直接填到完整端点
         const getImageGenApiEndpoint = () => {
@@ -307,7 +327,7 @@ createApp({
         // 同一提示词 + 同一参数只生成一次，之后翻聊天记录直接命中缓存
         const imageGenCacheKey = (prompt) => `imagegen_${hashForImageGen([
             getImageGenMode(), getImageGenApiEndpoint(), getImageGenModel(),
-            isAgnesImageGen() ? getAgnesImageSize() : getOpenAIImageSize(),
+            isVertexImageGen() ? getVertexImageSize() : isAgnesImageGen() ? getAgnesImageSize() : getOpenAIImageSize(),
             getImageGenArtists(), prompt
         ].join('\u0001'))}`;
 
@@ -319,7 +339,17 @@ createApp({
             if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
             const imageGenModel = getImageGenModel();
             let requestBody;
-            if (isAgnesImageGen()) {
+            if (isVertexImageGen()) {
+                requestBody = {
+                    prompt: fullPrompt,
+                    size: getVertexImageSize(),
+                    imageConfig: {
+                        aspectRatio: (settings.vertexImageSize || settings.imageSize).includes('竖图') ? '2:3' : (settings.vertexImageSize || settings.imageSize).includes('横图') ? '3:2' : '1:1',
+                        imageSize: (settings.vertexImageSize || settings.imageSize).startsWith('4K') ? '4K' : (settings.vertexImageSize || settings.imageSize).startsWith('2K') ? '2K' : '1K'
+                    },
+                    response_format: responseFormat
+                };
+            } else if (isAgnesImageGen()) {
                 // Agnes 只认 model/prompt/size：顶层 response_format 会 400，
                 // base64 用顶层 return_base64，url 要放进 extra_body。
                 requestBody = {
@@ -974,6 +1004,10 @@ createApp({
             openaiImageGenKey: '',
             openaiImageGenUrl: '',
             openaiImageGenModel: '',
+            vertexImageGenKey: '',
+            vertexImageGenUrl: 'https://vertex-proxy-production-6eaa.up.railway.app/v1',
+            vertexImageGenModel: 'gemini-3-pro-image',
+            vertexImageSize: '竖图',
             agnesImageGenKey: '',
             agnesImageGenUrl: '',
             agnesImageGenModel: '',
@@ -1137,7 +1171,7 @@ createApp({
         }, { deep: true });
 
         // Watch image gen and model settings for sync
-        watch(() => [settings.imageGenKey, settings.openaiImageGenKey, settings.openaiImageGenUrl, settings.openaiImageGenModel, settings.agnesImageGenKey, settings.agnesImageGenUrl, settings.agnesImageGenModel, settings.imageGenPath, settings.imageGenMode, settings.imageStyle, settings.customImageArtists, settings.imageGenCount, settings.qualityModel, settings.balancedModel, settings.fastModel, settings.uiTemplateModel, settings.fontFamily, settings.fontFamilyVersion], () => {
+        watch(() => [settings.imageGenKey, settings.openaiImageGenKey, settings.openaiImageGenUrl, settings.openaiImageGenModel, settings.vertexImageGenKey, settings.vertexImageGenUrl, settings.vertexImageGenModel, settings.vertexImageSize, settings.agnesImageGenKey, settings.agnesImageGenUrl, settings.agnesImageGenModel, settings.imageGenPath, settings.imageGenMode, settings.imageStyle, settings.customImageArtists, settings.imageGenCount, settings.qualityModel, settings.balancedModel, settings.fastModel, settings.uiTemplateModel, settings.fontFamily, settings.fontFamilyVersion], () => {
             syncSettingsToGenerator();
         });
 
@@ -4650,8 +4684,8 @@ ${content}
         };
 
         const fetchImageGenModels = async (isManual = false) => {
-            if (!isOpenAIImageGen()) {
-                if (isManual) showToast('只有 OpenAI 兼容 / Agnes 生图模式支持获取模型列表', 'info');
+            if (!isOpenAIImageGen() || isVertexImageGen()) {
+                if (isManual) showToast('Vertex Gemini 使用固定模型，无需获取模型列表', 'info');
                 return;
             }
             // OpenAI 兼容模式必须用用户自己的服务地址，否则会回退到默认服务、把它的模型灌进列表；
@@ -4694,8 +4728,8 @@ ${content}
         };
 
         const openImageGenModelSelector = async () => {
-            if (!isOpenAIImageGen()) {
-                showToast('只有 OpenAI 兼容 / Agnes 生图模式支持选择模型', 'info');
+            if (!isOpenAIImageGen() || isVertexImageGen()) {
+                showToast('Vertex Gemini 使用固定模型 gemini-3-pro-image', 'info');
                 return;
             }
             // 不自动拉取：列表只在用户点「刷新可用生图模型列表」时获取，避免灌入默认服务的模型
@@ -10523,7 +10557,7 @@ image###生成的提示词###
             enforceSpecialRules();
         });
 
-        watch(() => [settings.imageGenKey, settings.openaiImageGenKey, settings.openaiImageGenUrl, settings.openaiImageGenModel, settings.agnesImageGenKey, settings.agnesImageGenUrl, settings.agnesImageGenModel, settings.imageGenPath, settings.imageGenMode], () => {
+        watch(() => [settings.imageGenKey, settings.openaiImageGenKey, settings.openaiImageGenUrl, settings.openaiImageGenModel, settings.vertexImageGenKey, settings.vertexImageGenUrl, settings.vertexImageGenModel, settings.vertexImageSize, settings.agnesImageGenKey, settings.agnesImageGenUrl, settings.agnesImageGenModel, settings.imageGenPath, settings.imageGenMode], () => {
             enforceSpecialRules();
             if (isAutoImageGenEnabled.value) {
                 updateImageGenRegexState({ enableRegex: true });
