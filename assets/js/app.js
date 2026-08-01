@@ -4516,9 +4516,17 @@ ${content}
                 if (isManual) showToast('只有 OpenAI 兼容生图模式支持获取模型列表', 'info');
                 return;
             }
+            // 必须用用户自己的服务地址，否则会回退到默认服务、把它的模型灌进列表
+            if (!String(settings.imageGenUrl || '').trim()) {
+                if (isManual) showToast('请先填写自己的生图服务地址', 'info');
+                return;
+            }
             const key = String(settings.imageGenKey || '').trim();
-            const headers = {};
-            if (key) headers['Authorization'] = `Bearer ${key}`;
+            if (!key) {
+                if (isManual) showToast('请先填写自己的自动生图密钥', 'info');
+                return;
+            }
+            const headers = { 'Authorization': `Bearer ${key}` };
             imageGenModelsLoading.value = true;
             try {
                 if (isManual) showToast('正在获取生图模型列表...', 'info');
@@ -4551,8 +4559,10 @@ ${content}
                 showToast('只有 OpenAI 兼容生图模式支持选择模型', 'info');
                 return;
             }
+            // 不自动拉取：列表只在用户点「刷新可用生图模型列表」时获取，避免灌入默认服务的模型
             if (imageGenAvailableModels.value.length === 0) {
-                await fetchImageGenModels(true);
+                showToast('请先填写生图服务地址与密钥，再点「刷新可用生图模型列表」', 'info');
+                return;
             }
             // 文本模型残留的厂商标签在生图列表里通常不存在，重置回「全部」
             activeModelTag.value = 'all';
