@@ -157,14 +157,19 @@ createApp({
         const DEFAULT_IMAGE_GEN_PATH = '/generate?tag={prompt}&token={token}&model=nai-diffusion-4-5-full&artist={artist}&size={size}&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={negative}&nocache=0&noise_schedule=karras';
         const DEFAULT_IMAGE_GEN_NEGATIVE = '{{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}},awkward hand sign,weird hand gesture,contorted hand,unnatural finger pose,deformed hand gesture,{shaka},{hang loose},{{rock on}},{shaka sign}';
 
+        // Agnes 官方生图服务（agnes-image-2.1-flash 等），请求体与 OpenAI 略有差异
+        const AGNES_IMAGE_GEN_BASE_URL = 'https://apihub.agnes-ai.com';
+
         // GET 直链用官方现成服务，界面上不再暴露地址与路径；
-        // 自定义地址只对 OpenAI 兼容模式生效（这里用字面量判断，避免依赖后面才定义的常量）
-        const isOpenAIImageGenMode = () => settings.imageGenMode === 'openai';
-        const getImageGenBaseUrl = () => (
-            isOpenAIImageGenMode()
-                ? (String(settings.imageGenUrl || '').trim().replace(/\/+$/, '') || DEFAULT_IMAGE_GEN_BASE_URL)
-                : DEFAULT_IMAGE_GEN_BASE_URL
-        );
+        // 自定义地址只对 POST 类模式生效（这里用字面量判断，避免依赖后面才定义的常量）
+        const isAgnesImageGenMode = () => settings.imageGenMode === 'agnes';
+        const isPostImageGenMode = () => settings.imageGenMode === 'openai' || isAgnesImageGenMode();
+        const getImageGenBaseUrl = () => {
+            if (!isPostImageGenMode()) return DEFAULT_IMAGE_GEN_BASE_URL;
+            const custom = String(settings.imageGenUrl || '').trim().replace(/\/+$/, '');
+            if (custom) return custom;
+            return isAgnesImageGenMode() ? AGNES_IMAGE_GEN_BASE_URL : DEFAULT_IMAGE_GEN_BASE_URL;
+        };
         const getImageGenPath = () => DEFAULT_IMAGE_GEN_PATH;
         const isDefaultImageGenService = () => getImageGenBaseUrl() === DEFAULT_IMAGE_GEN_BASE_URL;
         // 把占位符替换成实际参数，拼出最终图片地址。
@@ -184,21 +189,27 @@ createApp({
             return getImageGenBaseUrl() + (path.startsWith('/') ? path : `/${path}`);
         };
 
-        // --- 生图模式：GET 直链 / OpenAI 兼容（POST） ---
+        // --- 生图模式：GET 直链 / OpenAI 兼容（POST）/ Agnes（POST） ---
         const IMAGE_GEN_MODE_GET = 'get';
         const IMAGE_GEN_MODE_OPENAI = 'openai';
+        const IMAGE_GEN_MODE_AGNES = 'agnes';
         const imageGenModeOptions = [
             { value: IMAGE_GEN_MODE_GET, label: 'GET 直链（图片地址即出图）' },
-            { value: IMAGE_GEN_MODE_OPENAI, label: 'OpenAI 兼容（POST /images/generations）' }
+            { value: IMAGE_GEN_MODE_OPENAI, label: 'OpenAI 兼容（POST /images/generations）' },
+            { value: IMAGE_GEN_MODE_AGNES, label: 'Agnes（POST /v1/images/generations）' }
         ];
         // 等待生成时的占位图（保持竖向比例，避免布局跳动）
         // 注意：这里刻意不写 font-size= 这类形如查询参数的片段，避免被 URL 参数替换逻辑误伤
         const IMAGE_GEN_PLACEHOLDER_SRC = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='448'><rect width='100%25' height='100%25' fill='%23f1f5f9'/><text x='50%25' y='50%25' text-anchor='middle' dominant-baseline='middle' fill='%2394a3b8' style='font-family:sans-serif;font-size:18px'>Generating...</text></svg>";
 
-        const getImageGenMode = () => (
-            settings.imageGenMode === IMAGE_GEN_MODE_OPENAI ? IMAGE_GEN_MODE_OPENAI : IMAGE_GEN_MODE_GET
-        );
-        const isOpenAIImageGen = () => getImageGenMode() === IMAGE_GEN_MODE_OPENAI;
+        const getImageGenMode = () => {
+            if (settings.imageGenMode === IMAGE_GEN_MODE_OPENAI) return IMAGE_GEN_MODE_OPENAI;
+            if (settings.imageGenMode === IMAGE_GEN_MODE_AGNES) return IMAGE_GEN_MODE_AGNES;
+            return IMAGE_GEN_MODE_GET;
+        };
+        const isAgnesImageGen = () => getImageGenMode() === IMAGE_GEN_MODE_AGNES;
+        // 两种 POST 模式共用同一套占位图 + MutationObserver 回填通路
+        const isOpenAIImageGen = () => getImageGenMode() !== IMAGE_GEN_MODE_GET;
         const getImageGenModel = () => String(settings.imageGenModel || '').trim();
         // 项目内的比例是中文标签，映射成 OpenAI 系接口接受的尺寸
         const OPENAI_IMAGE_SIZE_MAP = {
@@ -207,6 +218,13 @@ createApp({
             '方图': '1024x1024', '2K方图': '1024x1024', '4K方图': '1024x1024'
         };
         const getOpenAIImageSize = () => OPENAI_IMAGE_SIZE_MAP[settings.imageSize] || '1024x1024';
+        // Agnes 的 size 用具体像素串，文档示例是 1024x768 这类；沿用项目的中文比例标签
+        const AGNES_IMAGE_SIZE_MAP = {
+            '竖图': '768x1024', '2K竖图': '768x1024', '4K竖图': '768x1024',
+            '横图': '1024x768', '2K横图': '1024x768', '4K横图': '1024x768',
+            '方图': '1024x1024', '2K方图': '1024x1024', '4K方图': '1024x1024'
+        };
+        const getAgnesImageSize = () => AGNES_IMAGE_SIZE_MAP[settings.imageSize] || '1024x1024';
         const getImageGenArtists = () => cardUtils.getImageStyleArtists(settings.imageStyle, settings.customImageArtists);
         // 地址可能填到 /v1，也可能只填域名，甚至直接填到完整端点
         const getImageGenApiEndpoint = () => {
@@ -236,7 +254,9 @@ createApp({
         };
         // 同一提示词 + 同一参数只生成一次，之后翻聊天记录直接命中缓存
         const imageGenCacheKey = (prompt) => `imagegen_${hashForImageGen([
-            getImageGenApiEndpoint(), getImageGenModel(), getOpenAIImageSize(), getImageGenArtists(), prompt
+            getImageGenMode(), getImageGenApiEndpoint(), getImageGenModel(),
+            isAgnesImageGen() ? getAgnesImageSize() : getOpenAIImageSize(),
+            getImageGenArtists(), prompt
         ].join('\u0001'))}`;
 
         // 优先要 base64：部分中转站的图片域名开了防盗链（带 Referer 直接 403），
@@ -245,14 +265,29 @@ createApp({
             const apiKey = String(settings.imageGenKey || '').trim();
             const headers = { 'Content-Type': 'application/json' };
             if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-            const requestBody = {
-                prompt: fullPrompt,
-                n: 1,
-                size: getOpenAIImageSize(),
-                style,
-                response_format: responseFormat
-            };
             const imageGenModel = getImageGenModel();
+            let requestBody;
+            if (isAgnesImageGen()) {
+                // Agnes 只认 model/prompt/size：顶层 response_format 会 400，
+                // base64 用顶层 return_base64，url 要放进 extra_body。
+                requestBody = {
+                    prompt: fullPrompt,
+                    size: getAgnesImageSize()
+                };
+                if (responseFormat === 'b64_json') {
+                    requestBody.return_base64 = true;
+                } else {
+                    requestBody.extra_body = { response_format: 'url' };
+                }
+            } else {
+                requestBody = {
+                    prompt: fullPrompt,
+                    n: 1,
+                    size: getOpenAIImageSize(),
+                    style,
+                    response_format: responseFormat
+                };
+            }
             if (imageGenModel) requestBody.model = imageGenModel;
 
             const response = await fetch(getImageGenApiEndpoint(), {
@@ -2519,7 +2554,8 @@ createApp({
                 settings.stream = true;
                 // 早期版本打开弹窗会自动拉取默认服务的模型，可能把它的模型名存进设置；
                 // 没有填写自己的生图服务地址时，生图模型本就无意义，这里清掉遗留值。
-                if (!String(settings.imageGenUrl || '').trim()) {
+                // Agnes 模式有自己的官方地址，不需要填地址，选中的模型要保留。
+                if (settings.imageGenMode !== 'agnes' && !String(settings.imageGenUrl || '').trim()) {
                     settings.imageGenModel = '';
                 }
                 normalizeActiveToolAggressivenessSettings();
@@ -4521,11 +4557,12 @@ ${content}
 
         const fetchImageGenModels = async (isManual = false) => {
             if (!isOpenAIImageGen()) {
-                if (isManual) showToast('只有 OpenAI 兼容生图模式支持获取模型列表', 'info');
+                if (isManual) showToast('只有 OpenAI 兼容 / Agnes 生图模式支持获取模型列表', 'info');
                 return;
             }
-            // 必须用用户自己的服务地址，否则会回退到默认服务、把它的模型灌进列表
-            if (!String(settings.imageGenUrl || '').trim()) {
+            // OpenAI 兼容模式必须用用户自己的服务地址，否则会回退到默认服务、把它的模型灌进列表；
+            // Agnes 模式有自己的官方地址，不填也不会串到别家。
+            if (!isAgnesImageGen() && !String(settings.imageGenUrl || '').trim()) {
                 if (isManual) showToast('请先填写自己的生图服务地址', 'info');
                 return;
             }
@@ -4564,12 +4601,14 @@ ${content}
 
         const openImageGenModelSelector = async () => {
             if (!isOpenAIImageGen()) {
-                showToast('只有 OpenAI 兼容生图模式支持选择模型', 'info');
+                showToast('只有 OpenAI 兼容 / Agnes 生图模式支持选择模型', 'info');
                 return;
             }
             // 不自动拉取：列表只在用户点「刷新可用生图模型列表」时获取，避免灌入默认服务的模型
             if (imageGenAvailableModels.value.length === 0) {
-                showToast('请先填写生图服务地址与密钥，再点「刷新可用生图模型列表」', 'info');
+                showToast(isAgnesImageGen()
+                    ? '请先填写自动生图密钥，再点「刷新可用生图模型列表」'
+                    : '请先填写生图服务地址与密钥，再点「刷新可用生图模型列表」', 'info');
                 return;
             }
             // 文本模型残留的厂商标签在生图列表里通常不存在，重置回「全部」
