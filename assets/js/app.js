@@ -188,7 +188,6 @@ createApp({
             { value: IMAGE_GEN_MODE_GET, label: 'GET 直链（图片地址即出图）' },
             { value: IMAGE_GEN_MODE_OPENAI, label: 'OpenAI 兼容（POST /images/generations）' }
         ];
-        const DEFAULT_IMAGE_GEN_MODEL = 'gpt-image-2';
         // 等待生成时的占位图（保持竖向比例，避免布局跳动）
         // 注意：这里刻意不写 font-size= 这类形如查询参数的片段，避免被 URL 参数替换逻辑误伤
         const IMAGE_GEN_PLACEHOLDER_SRC = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='448'><rect width='100%25' height='100%25' fill='%23f1f5f9'/><text x='50%25' y='50%25' text-anchor='middle' dominant-baseline='middle' fill='%2394a3b8' style='font-family:sans-serif;font-size:18px'>Generating...</text></svg>";
@@ -197,7 +196,7 @@ createApp({
             settings.imageGenMode === IMAGE_GEN_MODE_OPENAI ? IMAGE_GEN_MODE_OPENAI : IMAGE_GEN_MODE_GET
         );
         const isOpenAIImageGen = () => getImageGenMode() === IMAGE_GEN_MODE_OPENAI;
-        const getImageGenModel = () => String(settings.imageGenModel || '').trim() || DEFAULT_IMAGE_GEN_MODEL;
+        const getImageGenModel = () => String(settings.imageGenModel || '').trim();
         // 项目内的比例是中文标签，映射成 OpenAI 系接口接受的尺寸
         const OPENAI_IMAGE_SIZE_MAP = {
             '竖图': '1024x1536', '2K竖图': '1024x1536', '4K竖图': '1024x1536',
@@ -243,17 +242,20 @@ createApp({
             const apiKey = String(settings.imageGenKey || '').trim();
             const headers = { 'Content-Type': 'application/json' };
             if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+            const requestBody = {
+                prompt: fullPrompt,
+                n: 1,
+                size: getOpenAIImageSize(),
+                style,
+                response_format: responseFormat
+            };
+            const imageGenModel = getImageGenModel();
+            if (imageGenModel) requestBody.model = imageGenModel;
+
             const response = await fetch(getImageGenApiEndpoint(), {
                 method: 'POST',
                 headers,
-                body: JSON.stringify({
-                    model: getImageGenModel(),
-                    prompt: fullPrompt,
-                    n: 1,
-                    size: getOpenAIImageSize(),
-                    style,
-                    response_format: responseFormat
-                }),
+                body: JSON.stringify(requestBody),
                 signal
             });
             if (!response.ok) {
