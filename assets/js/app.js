@@ -239,7 +239,7 @@ createApp({
 
         // 优先要 base64：部分中转站的图片域名开了防盗链（带 Referer 直接 403），
         // 浏览器取 url 必然带 Referer，拿不到图；b64_json 内嵌在 JSON 里不受影响。
-        const postOpenAIImage = async (fullPrompt, responseFormat, signal) => {
+        const postOpenAIImage = async (fullPrompt, responseFormat, signal, style = '') => {
             const apiKey = String(settings.imageGenKey || '').trim();
             const headers = { 'Content-Type': 'application/json' };
             if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
@@ -251,6 +251,7 @@ createApp({
                     prompt: fullPrompt,
                     n: 1,
                     size: getOpenAIImageSize(),
+                    style,
                     response_format: responseFormat
                 }),
                 signal
@@ -274,12 +275,12 @@ createApp({
             const fullPrompt = [prompt, artists].map(part => String(part || '').trim()).filter(Boolean).join(', ');
             const signal = options.signal;
             try {
-                return await postOpenAIImage(fullPrompt, 'b64_json', signal);
+                return await postOpenAIImage(fullPrompt, 'b64_json', signal, artists);
             } catch (error) {
                 // 少数服务不认 b64_json，只在这种参数错误上退回 url
                 const unsupported = error && error.status === 400 && /response_format|b64_json/i.test(String(error.detail || ''));
                 if (!unsupported) throw error;
-                return postOpenAIImage(fullPrompt, 'url', signal);
+                return postOpenAIImage(fullPrompt, 'url', signal, artists);
             }
         };
 
