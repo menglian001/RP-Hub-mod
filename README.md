@@ -46,8 +46,8 @@
 
 | 文件 | 说明 |
 |---|---|
-| [`RP-Hub_1.6_web.zip`](https://github.com/menglian001/RP-Hub-mod/releases/download/v1.6-mod/RP-Hub_1.6_web.zip) | 网页离线版。第三方库已本地化，解压后双击 `index.html`，断网可用 |
-| [`RP-Hub_1.6_mod.apk`](https://github.com/menglian001/RP-Hub-mod/releases/download/v1.6-mod/RP-Hub_1.6_mod.apk) | 安卓版（Capacitor 封装）。首次启动需联网加载 CDN 资源 |
+| [`RP-Hub_1.7.1_web.zip`](https://github.com/menglian001/RP-Hub-mod/releases/download/v1.7.1-mod/RP-Hub_1.7.1_web.zip) | 网页离线版。第三方库已本地化，解压后双击 `index.html`，断网可用 |
+| [`RP-Hub_1.7.1_mod.apk`](https://github.com/menglian001/RP-Hub-mod/releases/download/v1.7.1-mod/RP-Hub_1.7.1_mod.apk) | 安卓版（已修复第三方生图和中止请求问题） |
 
 APK 使用自签名证书，安装时系统可能提示来源未知。
 
