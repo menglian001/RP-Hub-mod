@@ -46,8 +46,8 @@
 
 | 文件 | 说明 |
 |---|---|
-| [`RP-Hub_1.7.1_web.zip`](https://github.com/menglian001/RP-Hub-mod/releases/download/v1.7.1-mod/RP-Hub_1.7.1_web.zip) | 网页离线版。第三方库已本地化，解压后双击 `index.html`，断网可用 |
-| [`RP-Hub_1.7.1_mod.apk`](https://github.com/menglian001/RP-Hub-mod/releases/download/v1.7.1-mod/RP-Hub_1.7.1_mod.apk) | 安卓版（已修复第三方生图和中止请求问题） |
+| [`RP-Hub_1.7.2_web.zip`](https://github.com/menglian001/RP-Hub-mod/releases/download/v1.7.2-mod/RP-Hub_1.7.2_web.zip) | 网页离线版。第三方库已本地化，解压后双击 `index.html`，断网可用 |
+| [`RP-Hub_1.7.2_mod.apk`](https://github.com/menglian001/RP-Hub-mod/releases/download/v1.7.2-mod/RP-Hub_1.7.2_mod.apk) | 安卓版（已修复第三方生图、风格参数、模型刷新和中止请求问题） |
 
 APK 使用自签名证书，安装时系统可能提示来源未知。
 
@@ -65,7 +65,7 @@ python3 -m http.server 8899
 ```
 
 仓库源码中的 `index.html` 通过 CDN 加载 Vue / Tailwind 等第三方库，**需要联网**。
-要离线使用请下载上方的 `RP-Hub_1.6_web.zip`，其中的库已全部本地化到 `assets/vendor/`。
+要离线使用请下载上方的 `RP-Hub_1.7.2_web.zip`，其中的库已全部本地化到 `assets/vendor/`。
 
 本项目不内置任何 API Key，所有配置保存在浏览器本地。
 
