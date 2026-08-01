@@ -3869,11 +3869,11 @@ ${content}
         });
 
         const modelTags = computed(() => {
-            const counts = { all: availableModels.value.length, other: 0 };
+            const counts = { all: currentModelList.value.length, other: 0 };
             const tags = new Set();
 
-            availableModels.value.forEach(m => {
-                const id = m.id.toLowerCase();
+            currentModelList.value.forEach(m => {
+                const id = String(getModelId(m) || '').toLowerCase();
                 let found = false;
                 for (const family of popularModelFamilies) {
                     if (id.includes(family)) {
@@ -3893,34 +3893,35 @@ ${content}
             return result;
         });
 
-        const imageGenModelOptions = computed(() => imageGenAvailableModels.value
-            .map(model => {
-                const id = typeof model === 'string' ? model : model?.id;
-                return { value: id, label: id };
-            })
-            .filter(option => option.value));
+        const getModelId = (model) => typeof model === 'string' ? model : model?.id;
+        const currentModelList = computed(() => modelSelectionTarget.value === 'imageGenModel'
+            ? imageGenAvailableModels.value
+            : availableModels.value);
 
         const filteredModels = computed(() => {
-            let result = availableModels.value;
+            let result = currentModelList.value;
 
             if (activeModelTag.value && activeModelTag.value !== 'all') {
                 if (activeModelTag.value === 'other') {
                     result = result.filter(m => {
-                        const id = m.id.toLowerCase();
+                        const id = String(getModelId(m) || '').toLowerCase();
                         return !popularModelFamilies.some(family => id.includes(family));
                     });
                 } else {
-                    result = result.filter(m => m.id.toLowerCase().includes(activeModelTag.value));
+                    result = result.filter(m => String(getModelId(m) || '').toLowerCase().includes(activeModelTag.value));
                 }
             }
 
             const searchQuery = modelSelectionTarget.value === 'memoryEmbeddingModel' ? 'embedding' : modelSearchQuery.value;
             if (searchQuery) {
                 const query = searchQuery.toLowerCase();
-                result = result.filter(m => m.id.toLowerCase().includes(query));
+                result = result.filter(m => String(getModelId(m) || '').toLowerCase().includes(query));
             }
 
-            return result.sort((a, b) => a.id.localeCompare(b.id));
+            return result
+                .map(model => ({ id: getModelId(model) }))
+                .filter(model => model.id)
+                .sort((a, b) => a.id.localeCompare(b.id));
         });
 
         const getCharacterWICount = (char) => {
@@ -4497,6 +4498,17 @@ ${content}
                 modelSearchQuery.value = '';
             }
             showModelSelector.value = true;
+        };
+
+        const openImageGenModelSelector = async () => {
+            if (!isOpenAIImageGen()) {
+                showToast('只有 OpenAI 兼容生图模式支持选择模型', 'info');
+                return;
+            }
+            if (imageGenAvailableModels.value.length === 0) {
+                await fetchImageGenModels(true);
+            }
+            openModelSelector('imageGenModel');
         };
 
         const selectModel = (modelId) => {
@@ -11892,7 +11904,7 @@ ${memoryFragmentSection}
         return {
             switchProfile, createNewProfile, deleteProfile, userProfiles, activeProfileId, showProfileDropdown,
             processMainContent,
-            currentView, showDescriptionPanel, showModelSelector, modelSelectionTarget, openModelSelector, showChatModelSelector, showCharacterEditor, showAddCharacterMenu, showPresetEditor, showUiTemplateEditor,
+            currentView, showDescriptionPanel, showModelSelector, modelSelectionTarget, openModelSelector, openImageGenModelSelector, showChatModelSelector, showCharacterEditor, showAddCharacterMenu, showPresetEditor, showUiTemplateEditor,
             showActiveToolEditor,
             showExportModal, sysInstruction, showInstructionPanel, exportItems, selectedExportIndices, // Export Modal
             showContextViewerModal, lastContextMessages, lastTriggeredWorldInfos, lastContextTotalLength, // Context Viewer
@@ -11904,7 +11916,7 @@ ${memoryFragmentSection}
             showUpdateModal, updateCountdown, latestUpdate, closeUpdateModal, isUpdateScrolledToBottom, checkUpdateScroll, // Update Modal
             showConfirmModal, confirmMessage, modelMode, showNoMemoryNeededModal, // Export for template
             isGenerating, isRemoteGenerating, remoteEstimatedTime, isReceiving, isThinking, hasActiveToolInlineWork, isConversationBusy, activeToolContinuationMessageId, activeToolContinuationHasResponse, userInput, modelSearchQuery, activeModelTag, modelTags, characterSearchQuery, filteredModels, filteredCharacters,
-            user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, imageStyleOptions, imageSizeOptions, imageGenCountOptions, imageGenModeOptions, imageGenAvailableModels, imageGenModelOptions, imageGenModelsLoading, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
+            user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, imageStyleOptions, imageSizeOptions, imageGenCountOptions, imageGenModeOptions, imageGenAvailableModels, imageGenModelsLoading, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
             activeTools, activeToolAggressivenessOptions: ACTIVE_TOOL_AGGRESSIVENESS_OPTIONS, editingActiveTool, normalizeActiveTools, isWebActiveTool, isWorldInfoActiveTool, getWorldInfoAccessMode, canConfigureActiveToolResultCount, getActiveToolDisplayDescription, getActiveToolResultCountMin, getActiveToolResultCountMax,
             getToolCallModeText, hasThinkingOrTools, isMessageThinkingOrRunning, isThinkingSummaryOpen, toggleThinkingSummary, markThinkingSummaryDetailOpened, getTimelineSteps,
             chatRoundStats, conversationBodyLength, summaryCompressedBodyLength,
