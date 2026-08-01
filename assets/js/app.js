@@ -163,10 +163,33 @@ createApp({
         // GET 直链用官方现成服务，界面上不再暴露地址与路径；
         // 自定义地址只对 POST 类模式生效（这里用字面量判断，避免依赖后面才定义的常量）
         const isAgnesImageGenMode = () => settings.imageGenMode === 'agnes';
-        const isPostImageGenMode = () => settings.imageGenMode === 'openai' || isAgnesImageGenMode();
+        const isOpenAIImageGenMode = () => settings.imageGenMode === 'openai';
+        const isPostImageGenMode = () => isOpenAIImageGenMode() || isAgnesImageGenMode();
+        const getImageGenProfile = () => {
+            if (isAgnesImageGenMode()) {
+                return {
+                    key: String(settings.agnesImageGenKey || '').trim(),
+                    url: String(settings.agnesImageGenUrl || '').trim(),
+                    model: String(settings.agnesImageGenModel || '').trim()
+                };
+            }
+            if (isOpenAIImageGenMode()) {
+                return {
+                    key: String(settings.openaiImageGenKey || '').trim(),
+                    url: String(settings.openaiImageGenUrl || '').trim(),
+                    model: String(settings.openaiImageGenModel || '').trim()
+                };
+            }
+            return {
+                key: String(settings.imageGenKey || '').trim(),
+                url: '',
+                model: ''
+            };
+        };
         const getImageGenBaseUrl = () => {
             if (!isPostImageGenMode()) return DEFAULT_IMAGE_GEN_BASE_URL;
-            const custom = String(settings.imageGenUrl || '').trim().replace(/\/+$/, '');
+            const profile = getImageGenProfile();
+            const custom = profile.url.replace(/\/+$/, '');
             if (custom) return custom;
             return isAgnesImageGenMode() ? AGNES_IMAGE_GEN_BASE_URL : DEFAULT_IMAGE_GEN_BASE_URL;
         };
@@ -229,7 +252,17 @@ createApp({
         const isAgnesImageGen = () => getImageGenMode() === IMAGE_GEN_MODE_AGNES;
         // 两种 POST 模式共用同一套占位图 + MutationObserver 回填通路
         const isOpenAIImageGen = () => getImageGenMode() !== IMAGE_GEN_MODE_GET;
-        const getImageGenModel = () => String(settings.imageGenModel || '').trim();
+        const getImageGenModel = () => getImageGenProfile().model;
+        const getImageGenKey = () => getImageGenProfile().key;
+        const getActiveImageGenKey = () => {
+            if (isAgnesImageGenMode()) return settings.agnesImageGenKey;
+            if (isOpenAIImageGenMode()) return settings.openaiImageGenKey;
+            return settings.imageGenKey;
+        };
+        const setActiveImageGenModel = (value) => {
+            if (isAgnesImageGenMode()) settings.agnesImageGenModel = value;
+            else settings.openaiImageGenModel = value;
+        };
         // 项目内的比例是中文标签，映射成 OpenAI 系接口接受的尺寸
         const OPENAI_IMAGE_SIZE_MAP = {
             '竖图': '1024x1536', '2K竖图': '1024x1536', '4K竖图': '1024x1536',
@@ -281,7 +314,7 @@ createApp({
         // 优先要 base64：部分中转站的图片域名开了防盗链（带 Referer 直接 403），
         // 浏览器取 url 必然带 Referer，拿不到图；b64_json 内嵌在 JSON 里不受影响。
         const postOpenAIImage = async (fullPrompt, responseFormat, signal, style = '') => {
-            const apiKey = String(settings.imageGenKey || '').trim();
+            const apiKey = getImageGenKey();
             const headers = { 'Content-Type': 'application/json' };
             if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
             const imageGenModel = getImageGenModel();
@@ -547,8 +580,8 @@ createApp({
             quotaLoading.value = true;
             quotaError.value = false;
             try {
-                const imageGenToken = settings.imageGenKey.trim();
-                if (!imageGenToken) {
+            const imageGenToken = String(getActiveImageGenKey() || '').trim();
+            if (!imageGenToken) {
                     quotaValue.value = 0;
                     return;
                 }
@@ -932,11 +965,18 @@ createApp({
             fontFamily: 'modern',
             fontFamilyVersion: 4,
             fontSize: window.innerWidth > 768 ? 16 : 14,
+            // 保留旧字段用于兼容旧版本数据；OpenAI / Agnes 实际使用各自独立配置。
             imageGenKey: '',
             imageGenUrl: '',
             imageGenPath: '',
             imageGenMode: 'get',
             imageGenModel: '',
+            openaiImageGenKey: '',
+            openaiImageGenUrl: '',
+            openaiImageGenModel: '',
+            agnesImageGenKey: '',
+            agnesImageGenUrl: '',
+            agnesImageGenModel: '',
 
             imageStyle: 'vertical',
             customImageArtists: '',
@@ -1097,7 +1137,7 @@ createApp({
         }, { deep: true });
 
         // Watch image gen and model settings for sync
-        watch(() => [settings.imageGenKey, settings.imageGenUrl, settings.imageGenPath, settings.imageGenMode, settings.imageGenModel, settings.imageStyle, settings.customImageArtists, settings.imageGenCount, settings.qualityModel, settings.balancedModel, settings.fastModel, settings.uiTemplateModel, settings.fontFamily, settings.fontFamilyVersion], () => {
+        watch(() => [settings.imageGenKey, settings.openaiImageGenKey, settings.openaiImageGenUrl, settings.openaiImageGenModel, settings.agnesImageGenKey, settings.agnesImageGenUrl, settings.agnesImageGenModel, settings.imageGenPath, settings.imageGenMode, settings.imageStyle, settings.customImageArtists, settings.imageGenCount, settings.qualityModel, settings.balancedModel, settings.fastModel, settings.uiTemplateModel, settings.fontFamily, settings.fontFamilyVersion], () => {
             syncSettingsToGenerator();
         });
 
@@ -2581,6 +2621,19 @@ createApp({
                         if (!legacyProvider && savedSettings.apiUrl) settings.customApiUrl = savedSettings.apiUrl;
                     }
                     normalizeApiProviderSettings();
+                    // 兼容旧版共用字段：首次升级时只迁移到当时所在的 POST 模式，避免两种模式互相串值。
+                    if (!Object.prototype.hasOwnProperty.call(savedSettings, 'openaiImageGenKey')
+                        && savedSettings.imageGenMode === 'openai') {
+                        settings.openaiImageGenKey = savedSettings.imageGenKey || '';
+                        settings.openaiImageGenUrl = savedSettings.imageGenUrl || '';
+                        settings.openaiImageGenModel = savedSettings.imageGenModel || '';
+                    }
+                    if (!Object.prototype.hasOwnProperty.call(savedSettings, 'agnesImageGenKey')
+                        && savedSettings.imageGenMode === 'agnes') {
+                        settings.agnesImageGenKey = savedSettings.imageGenKey || '';
+                        settings.agnesImageGenUrl = savedSettings.imageGenUrl || '';
+                        settings.agnesImageGenModel = savedSettings.imageGenModel || '';
+                    }
                 } else {
                     normalizeApiProviderSettings();
                 }
@@ -2596,8 +2649,8 @@ createApp({
                 // 早期版本打开弹窗会自动拉取默认服务的模型，可能把它的模型名存进设置；
                 // 没有填写自己的生图服务地址时，生图模型本就无意义，这里清掉遗留值。
                 // Agnes 模式有自己的官方地址，不需要填地址，选中的模型要保留。
-                if (settings.imageGenMode !== 'agnes' && !String(settings.imageGenUrl || '').trim()) {
-                    settings.imageGenModel = '';
+                if (settings.imageGenMode === 'openai' && !String(settings.openaiImageGenUrl || '').trim()) {
+                    settings.openaiImageGenModel = '';
                 }
                 normalizeActiveToolAggressivenessSettings();
 
@@ -4603,11 +4656,11 @@ ${content}
             }
             // OpenAI 兼容模式必须用用户自己的服务地址，否则会回退到默认服务、把它的模型灌进列表；
             // Agnes 模式有自己的官方地址，不填也不会串到别家。
-            if (!isAgnesImageGen() && !String(settings.imageGenUrl || '').trim()) {
+            if (isOpenAIImageGenMode() && !getImageGenProfile().url) {
                 if (isManual) showToast('请先填写自己的生图服务地址', 'info');
                 return;
             }
-            const key = String(settings.imageGenKey || '').trim();
+            const key = getImageGenKey();
             if (!key) {
                 if (isManual) showToast('请先填写自己的自动生图密钥', 'info');
                 return;
@@ -4670,7 +4723,11 @@ ${content}
                 return;
             }
 
-            settings[modelSelectionTarget.value] = modelId;
+            if (modelSelectionTarget.value === 'imageGenModel') {
+                setActiveImageGenModel(modelId);
+            } else {
+                settings[modelSelectionTarget.value] = modelId;
+            }
 
             if (
                 (modelSelectionTarget.value === 'qualityModel' && currentModelMode.value === 'quality') ||
@@ -4719,7 +4776,7 @@ ${content}
 
         const checkImageGenStatus = async () => {
             // 没填密钥根本用不了生图，宽松探测会一直显示绿色，这里直接判为未连接
-            if (!String(settings.imageGenKey || '').trim()) {
+            if (!getImageGenKey()) {
                 imageGenStatus.value = 'error';
                 imageGenLatency.value = 0;
                 return;
@@ -4730,7 +4787,7 @@ ${content}
                     const base = getImageGenBaseUrl().replace(/\/images\/generations$/, '');
                     const url = /\/v\d+$/.test(base) ? `${base}/models` : `${base}/v1/models`;
                     const headers = {};
-                    const key = String(settings.imageGenKey || '').trim();
+                    const key = getImageGenKey();
                     if (key) headers['Authorization'] = `Bearer ${key}`;
                     return fetch(url, { headers, signal });
                 });
@@ -4881,7 +4938,7 @@ ${content}
                 } else {
                     const src = buildImageGenUrl({
                         prompt: encodeURIComponent(CONNECTION_TEST_PROMPT),
-                        token: String(settings.imageGenKey || '').trim(),
+                        token: String(getActiveImageGenKey() || '').trim(),
                         artist: encodeURIComponent(getImageGenArtists()),
                         size: settings.imageSize
                     });
@@ -10314,7 +10371,7 @@ ${content}
         };
 
         const enforceSpecialRules = () => {
-            const imageGenToken = settings.imageGenKey.trim();
+            const imageGenToken = String(getActiveImageGenKey() || '').trim();
 
             // 1. NAI画图正则 (统一版本)
             const imageGenRegexName = 'NAI画图正则';
@@ -10458,7 +10515,15 @@ image###生成的提示词###
 
         };
 
-        watch(() => [settings.imageGenKey, settings.imageGenUrl, settings.imageGenPath, settings.imageGenMode, settings.imageGenModel], () => {
+        watch(() => settings.imageGenMode, () => {
+            // 模式切换后不要沿用另一接口刚获取的模型列表，避免误选错接口模型。
+            imageGenAvailableModels.value = [];
+            activeModelTag.value = 'all';
+            modelSearchQuery.value = '';
+            enforceSpecialRules();
+        });
+
+        watch(() => [settings.imageGenKey, settings.openaiImageGenKey, settings.openaiImageGenUrl, settings.openaiImageGenModel, settings.agnesImageGenKey, settings.agnesImageGenUrl, settings.agnesImageGenModel, settings.imageGenPath, settings.imageGenMode], () => {
             enforceSpecialRules();
             if (isAutoImageGenEnabled.value) {
                 updateImageGenRegexState({ enableRegex: true });

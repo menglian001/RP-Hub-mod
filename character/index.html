@@ -1764,8 +1764,12 @@
                             api.key = mainSettings.apiKey || '';
 
                             // Sync Image Gen
-                            // Always sync key even if empty to ensure reset
-                            options.imageGenKey = mainSettings.imageGenKey;
+                            // 使用当前接口模式的密钥，避免 OpenAI 与 Agnes 配置串用
+                            options.imageGenKey = mainSettings.imageGenMode === 'agnes'
+                                ? (mainSettings.agnesImageGenKey || '')
+                                : mainSettings.imageGenMode === 'openai'
+                                    ? (mainSettings.openaiImageGenKey || '')
+                                    : (mainSettings.imageGenKey || '');
 
                             // Map imageStyle to avatarStyle (vertical -> default, r18 -> hentai)
                             if (mainSettings.imageStyle === 'r18') {
