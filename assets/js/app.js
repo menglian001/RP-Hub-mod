@@ -597,6 +597,8 @@ createApp({
         const popularModelFamilies = ['claude', 'gemini', 'deepseek', 'llama', 'glm', 'minimax', 'moonshot', 'grok'];
         const characterSearchQuery = ref('');
         const availableModels = ref([]);
+        const imageGenAvailableModels = ref([]);
+        const imageGenModelsLoading = ref(false);
         const toasts = ref([]);
         let toastIdSeed = 0;
         const chatContainer = ref(null);
@@ -3891,6 +3893,13 @@ ${content}
             return result;
         });
 
+        const imageGenModelOptions = computed(() => imageGenAvailableModels.value
+            .map(model => {
+                const id = typeof model === 'string' ? model : model?.id;
+                return { value: id, label: id };
+            })
+            .filter(option => option.value));
+
         const filteredModels = computed(() => {
             let result = availableModels.value;
 
@@ -4447,6 +4456,35 @@ ${content}
             } catch (error) {
                 console.error(error);
                 showToast('获取模型失败: ' + error.message, 'error');
+            }
+        };
+
+        const getImageGenModelsEndpoint = () => {
+            const base = getImageGenBaseUrl().replace(/\/images\/generations$/, '');
+            return /\/v\d+$/.test(base) ? `${base}/models` : `${base}/v1/models`;
+        };
+
+        const fetchImageGenModels = async (isManual = false) => {
+            if (!isOpenAIImageGen()) {
+                if (isManual) showToast('只有 OpenAI 兼容生图模式支持获取模型列表', 'info');
+                return;
+            }
+            const key = String(settings.imageGenKey || '').trim();
+            const headers = {};
+            if (key) headers['Authorization'] = `Bearer ${key}`;
+            imageGenModelsLoading.value = true;
+            try {
+                if (isManual) showToast('正在获取生图模型列表...', 'info');
+                const response = await fetch(getImageGenModelsEndpoint(), { headers });
+                if (!response.ok) throw new Error('Failed to fetch image models');
+                const data = await response.json();
+                imageGenAvailableModels.value = Array.isArray(data.data) ? data.data : [];
+                if (isManual) showToast(`成功获取 ${imageGenAvailableModels.value.length} 个生图模型`, 'success');
+            } catch (error) {
+                console.error(error);
+                if (isManual) showToast('获取生图模型失败: ' + error.message, 'error');
+            } finally {
+                imageGenModelsLoading.value = false;
             }
         };
 
@@ -11866,7 +11904,7 @@ ${memoryFragmentSection}
             showUpdateModal, updateCountdown, latestUpdate, closeUpdateModal, isUpdateScrolledToBottom, checkUpdateScroll, // Update Modal
             showConfirmModal, confirmMessage, modelMode, showNoMemoryNeededModal, // Export for template
             isGenerating, isRemoteGenerating, remoteEstimatedTime, isReceiving, isThinking, hasActiveToolInlineWork, isConversationBusy, activeToolContinuationMessageId, activeToolContinuationHasResponse, userInput, modelSearchQuery, activeModelTag, modelTags, characterSearchQuery, filteredModels, filteredCharacters,
-            user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, imageStyleOptions, imageSizeOptions, imageGenCountOptions, imageGenModeOptions, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
+            user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, imageStyleOptions, imageSizeOptions, imageGenCountOptions, imageGenModeOptions, imageGenAvailableModels, imageGenModelOptions, imageGenModelsLoading, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
             activeTools, activeToolAggressivenessOptions: ACTIVE_TOOL_AGGRESSIVENESS_OPTIONS, editingActiveTool, normalizeActiveTools, isWebActiveTool, isWorldInfoActiveTool, getWorldInfoAccessMode, canConfigureActiveToolResultCount, getActiveToolDisplayDescription, getActiveToolResultCountMin, getActiveToolResultCountMax,
             getToolCallModeText, hasThinkingOrTools, isMessageThinkingOrRunning, isThinkingSummaryOpen, toggleThinkingSummary, markThinkingSummaryDetailOpened, getTimelineSteps,
             chatRoundStats, conversationBodyLength, summaryCompressedBodyLength,
@@ -12067,7 +12105,7 @@ ${memoryFragmentSection}
                 showToast(`成功导入 ${normalized.length} 个分片`, 'success');
             }, error => showToast(`导入失败: ${error.message || 'JSON 格式错误'}`, 'error')),
             toggleMobileMenu, closeMobileMenu,
-            fetchModels, selectModel, sendMessage, autoResizeInput, handleChatInputFocus, handleChatInputBlur, stopGeneration, clearChat, toggleChatFullscreen,
+            fetchModels, fetchImageGenModels, selectModel, sendMessage, autoResizeInput, handleChatInputFocus, handleChatInputBlur, stopGeneration, clearChat, toggleChatFullscreen,
             handleConfirm, handleCancel, // Export handlers
             copyMessage, deleteMessage, regenerateMessage,
             editMessage, saveEditMessage, cancelEditMessage,

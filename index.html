@@ -2099,9 +2099,19 @@
                                             <template v-if="settings.imageGenMode === 'openai'">
                                                 <label
                                                     class="block text-xs font-bold text-gray-500 uppercase tracking-wider mt-3 mb-2">生图模型</label>
-                                                <input v-model="settings.imageGenModel" type="text"
-                                                    class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-400 focus:outline-none transition-all shadow-sm font-mono"
-                                                    placeholder="留空默认 gpt-image-2">
+                                                <div class="flex gap-2">
+                                                    <input v-model="settings.imageGenModel" type="text" list="image-gen-model-list"
+                                                        class="min-w-0 flex-1 bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-400 focus:outline-none transition-all shadow-sm font-mono"
+                                                        placeholder="留空默认 gpt-image-2">
+                                                    <button @click="fetchImageGenModels(true)" type="button"
+                                                        :disabled="imageGenModelsLoading"
+                                                        class="shrink-0 px-3 py-1.5 bg-white hover:bg-teal-50 text-gray-600 hover:text-teal-700 rounded-lg border border-gray-200 hover:border-teal-200 transition-all shadow-sm active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed text-xs font-medium">
+                                                        {{ imageGenModelsLoading ? '刷新中' : '刷新' }}
+                                                    </button>
+                                                </div>
+                                                <datalist id="image-gen-model-list">
+                                                    <option v-for="model in imageGenModelOptions" :key="model.value" :value="model.value"></option>
+                                                </datalist>
                                                 <p class="mt-2 text-xs text-gray-400 leading-relaxed">
                                                     走 <code class="text-gray-500">POST /v1/images/generations</code>，密钥填在上方「自动生图密钥」。
                                                     生成结果按提示词缓存，重复浏览不会重复计费。
