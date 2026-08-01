@@ -595,6 +595,16 @@ createApp({
         const modelSearchQuery = ref('');
         const activeModelTag = ref('all');
         const popularModelFamilies = ['claude', 'gemini', 'deepseek', 'llama', 'glm', 'minimax', 'moonshot', 'grok'];
+        // 自动归类时忽略的规格/通用词，避免出现 2K、4K、IMAGE 这类无意义标签
+        const modelTokenStopwords = new Set([
+            '512', '768', '1024', '2048', '1k', '2k', '4k', '8k',
+            'pro', 'max', 'mini', 'lite', 'nano', 'plus', 'ultra', 'turbo', 'fast', 'flash',
+            'large', 'medium', 'small', 'high', 'low', 'std', 'hd', 'free', 'exp',
+            'beta', 'preview', 'latest', 'stable', 'dev', 'test',
+            'image', 'images', 'img', 'photo', 'pic', 'draw', 'paint', 'text', 'vision',
+            'gen', 'generate', 'generation', 'edit', 'model', 'models', 'chat', 'instruct',
+            'api', 'openai', 'official', 'default', 'base', 'core', 'plain'
+        ]);
         const characterSearchQuery = ref('');
         const availableModels = ref([]);
         const imageGenAvailableModels = ref([]);
@@ -3868,59 +3878,93 @@ ${content}
             return Math.max(0, predictedLength);
         });
 
-        const modelTags = computed(() => {
-            const counts = { all: currentModelList.value.length, other: 0 };
-            const tags = new Set();
-
-            currentModelList.value.forEach(m => {
-                const id = String(getModelId(m) || '').toLowerCase();
-                let found = false;
-                for (const family of popularModelFamilies) {
-                    if (id.includes(family)) {
-                        tags.add(family);
-                        counts[family] = (counts[family] || 0) + 1;
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) {
-                    counts.other++;
-                }
-            });
-            const result = [{ name: 'all', count: counts.all }];
-            Array.from(tags).sort().forEach(t => result.push({ name: t, count: counts[t] }));
-            if (counts.other > 0) result.push({ name: 'other', count: counts.other });
-            return result;
-        });
-
         const getModelId = (model) => typeof model === 'string' ? model : model?.id;
-        const currentModelList = computed(() => modelSelectionTarget.value === 'imageGenModel'
+        const isImageGenModelTarget = computed(() => modelSelectionTarget.value === 'imageGenModel');
+        const currentModelList = computed(() => isImageGenModelTarget.value
             ? imageGenAvailableModels.value
             : availableModels.value);
 
+        // 作者原有的文本厂商关键词归类
+        const matchPopularModelFamily = (id) => popularModelFamilies.find(family => id.includes(family)) || null;
+
+        // 生图模型来自第三方接口，命名五花八门，这里从模型 id 自动推导厂商/系列，不预置任何模型名单
+        const deriveModelFamily = (id) => {
+            const keyword = matchPopularModelFamily(id);
+            if (keyword) return keyword;
+
+            const slashIndex = id.indexOf('/');
+            // 聚合网关常见的 provider/model 形式，斜杠前整段就是厂商
+            if (slashIndex > 0) {
+                const provider = id.slice(0, slashIndex).replace(/[^a-z0-9-]+/g, '');
+                if (provider.length >= 2) return provider;
+            }
+
+            const tokens = id.split(/[^a-z0-9]+/).filter(Boolean);
+
+            for (const token of tokens) {
+                // 去掉尾部版本号，让 wanx2、sd3 与 wanx、sd 归到同一系列
+                const family = token.replace(/\d+$/, '');
+                if (family.length < 2) continue;
+                if (modelTokenStopwords.has(family) || modelTokenStopwords.has(token)) continue;
+                return family;
+            }
+            return null;
+        };
+
+        const normalizedModelList = computed(() => currentModelList.value
+            .map(model => {
+                const rawId = getModelId(model);
+                if (!rawId) return null;
+                const id = String(rawId);
+                const lowerId = id.toLowerCase();
+                return {
+                    id,
+                    lowerId,
+                    family: isImageGenModelTarget.value ? deriveModelFamily(lowerId) : matchPopularModelFamily(lowerId)
+                };
+            })
+            .filter(Boolean));
+
+        const modelTags = computed(() => {
+            const counts = {};
+            normalizedModelList.value.forEach(model => {
+                if (!model.family) return;
+                counts[model.family] = (counts[model.family] || 0) + 1;
+            });
+
+            // 自动推导的标签容易出现只覆盖 1 个模型的长尾厂商，合并进「其他」避免标签区被刷屏
+            const families = Object.keys(counts).filter(family => (
+                counts[family] >= 2 || !!matchPopularModelFamily(family)
+            ));
+            const kept = new Set(families);
+            const otherCount = normalizedModelList.value.filter(model => !model.family || !kept.has(model.family)).length;
+
+            const result = [{ name: 'all', count: normalizedModelList.value.length }];
+            families.sort().forEach(family => result.push({ name: family, count: counts[family] }));
+            if (otherCount > 0) result.push({ name: 'other', count: otherCount });
+            return result;
+        });
+
         const filteredModels = computed(() => {
-            let result = currentModelList.value;
+            const keptFamilies = new Set(modelTags.value.map(tag => tag.name));
+            let result = normalizedModelList.value;
 
             if (activeModelTag.value && activeModelTag.value !== 'all') {
                 if (activeModelTag.value === 'other') {
-                    result = result.filter(m => {
-                        const id = String(getModelId(m) || '').toLowerCase();
-                        return !popularModelFamilies.some(family => id.includes(family));
-                    });
+                    result = result.filter(model => !model.family || !keptFamilies.has(model.family));
                 } else {
-                    result = result.filter(m => String(getModelId(m) || '').toLowerCase().includes(activeModelTag.value));
+                    result = result.filter(model => model.family === activeModelTag.value);
                 }
             }
 
             const searchQuery = modelSelectionTarget.value === 'memoryEmbeddingModel' ? 'embedding' : modelSearchQuery.value;
             if (searchQuery) {
                 const query = searchQuery.toLowerCase();
-                result = result.filter(m => String(getModelId(m) || '').toLowerCase().includes(query));
+                result = result.filter(model => model.lowerId.includes(query));
             }
 
             return result
-                .map(model => ({ id: getModelId(model) }))
-                .filter(model => model.id)
+                .map(model => ({ id: model.id }))
                 .sort((a, b) => a.id.localeCompare(b.id));
         });
 
@@ -4508,6 +4552,9 @@ ${content}
             if (imageGenAvailableModels.value.length === 0) {
                 await fetchImageGenModels(true);
             }
+            // 文本模型残留的厂商标签在生图列表里通常不存在，重置回「全部」
+            activeModelTag.value = 'all';
+            modelSearchQuery.value = '';
             openModelSelector('imageGenModel');
         };
 
