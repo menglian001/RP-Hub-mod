@@ -855,17 +855,16 @@ createApp({
             isUpdateScrolledToBottom.value = (el.scrollHeight - el.scrollTop - el.clientHeight) < 10;
         };
         const latestUpdate = reactive({
-            id: 10159, // 确保这是一个五位数ID，每次更新内容时增加这个数字
+            id: 10160, // 确保这是一个五位数ID，每次更新内容时增加这个数字
             date: new Date().toISOString().split('T')[0],
             title: '网站公告',
             content: `
-### RP-Hub 1.8.2
+### RP-Hub 1.8.5
 
-- 新增 ComfyUI 上游（OpenAI 兼容接口）模式
-- 支持刷新和选择上游可用生图模型
-- 支持将模型、提示词、画风、比例和数量传给上游工作流
-- 修复 ComfyUI 模式未复用 OpenAI 兼容地址、密钥和模型配置
-- 优化聊天生图结果保存到图片管理
+- 新增聊天生图图片长按操作菜单，支持系统分享与下载降级
+- 支持单张聊天生图重新生成，保留完整对话并同步图片管理
+- 优化退出后恢复上次聊天时的加载显示
+- 优化平板横屏下的聊天与输入区域布局
 
 本项目为全开源公益项目，严禁倒卖源码，二改需经作者授权
 
