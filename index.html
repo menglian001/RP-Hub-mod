@@ -83,6 +83,7 @@
     </script>
     <script>
         document.write('<link rel="stylesheet" href="assets/css/styles.css?v=' + new Date().getTime() + '">');
+        document.write('<link rel="stylesheet" href="assets/css/image-library.css?v=' + new Date().getTime() + '">');
     </script>
 </head>
 <body class="bg-gray-50 text-gray-900 font-sans selection:bg-primary-200 selection:text-primary-900">
@@ -254,6 +255,14 @@
                     <span v-if="!isSidebarCollapsed && uiTemplateUpdateStatus.state === 'running'" class="ml-auto">
                         <span class="inline-block w-2 h-2 rounded-full bg-primary-500 memory-extracting"></span>
                     </span>
+                </button>
+                <button @click="currentView = 'images'; closeMobileMenu()"
+                    title="图片管理"
+                    :class="['sidebar-nav-button flex items-center rounded-xl transition-all duration-200 font-medium', currentView === 'images' ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900', isSidebarCollapsed ? 'w-12 h-12 mx-auto justify-center p-0' : 'w-full px-3 py-2.5']">
+                    <svg class="w-5 h-5" :class="isSidebarCollapsed ? 'mr-0' : 'mr-3'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a2 2 0 012-2h12a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm4 9l2.5-3 2 2.5 2.5-3 4 5H8z"></path>
+                    </svg>
+                    <span v-show="!isSidebarCollapsed" class="whitespace-nowrap overflow-hidden">图片管理</span>
                 </button>
                 <button @click="currentView = 'characters'; closeMobileMenu()"
                     title="角色卡管理"
@@ -551,9 +560,10 @@
                 </div>
 
                 <!-- Chat Messages -->
-                <div ref="chatContainer" @click="showChatModelSelector = false"
+                <div ref="chatContainer" @click="handleChatContainerClick"
                     @scroll="handleChatScroll"
-                    class="flex-1 overflow-y-auto overflow-x-hidden px-2 pt-14 md:pt-16 pb-44 md:pb-60 relative z-0 space-y-14 md:space-y-16 transition-all duration-500"
+                    @pointerdown="handleChatImagePointerDown" @pointerup="clearImageLongPress" @pointercancel="clearImageLongPress" @pointerleave="clearImageLongPress" @contextmenu="handleChatImageContextMenu"
+                    class="chat-message-list flex-1 overflow-y-auto overflow-x-hidden px-2 pt-14 md:pt-16 pb-44 md:pb-60 relative z-0 space-y-14 md:space-y-16 transition-all duration-500"
                     :class="!settings.useCharacterBackground || !currentCharacter || !currentCharacter?.avatar ? 'bg-gray-50' : ''">
                     <div v-if="!currentCharacter"
                         class="flex flex-col items-center justify-center h-full text-gray-500">
@@ -569,6 +579,11 @@
                             class="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors shadow-sm font-bold">
                             前往角色管理
                         </button>
+                    </div>
+                    <div v-else-if="isChatHistoryRestoring"
+                        class="flex flex-col items-center justify-center h-full text-gray-400 opacity-60">
+                        <div class="chat-history-restoring-spinner" aria-hidden="true"></div>
+                        <p>正在恢复上次聊天...</p>
                     </div>
                     <div v-else-if="chatHistory.length === 0"
                         class="flex flex-col items-center justify-center h-full text-gray-400 opacity-60">
@@ -609,7 +624,7 @@
                                 :class="['flex flex-col min-w-0', settings.immersiveMode ? 'immersive-message-column' : '', messageUsesWideLayout(msg) ? 'flex-1 w-full' : '', msg.isSelf ? 'items-end' : 'items-start']">
                                 <!-- Name (Outside Bubble) -->
                                 <div v-show="!settings.immersiveMode"
-                                    :class="['text-[10px] font-bold text-gray-600 mb-1 select-none px-1.5 py-0.5 rounded-md bg-white/50 backdrop-blur-sm border border-white/20 w-fit shadow-sm truncate max-w-[150px] md:max-w-[250px] msg-name-tag', msg.isSelf ? 'ml-auto mr-1' : 'mr-auto ml-1', msg.shouldAnimate ? 'animate-message-fade-in' : '']">
+                                    :class="['text-[10px] font-bold text-gray-600 mb-1 select-none px-1.5 py-0.5 rounded-md bg-white/50 backdrop-blur-sm border border-white/20 w-fit shadow-sm truncate max-w-[210px] md:max-w-[250px] msg-name-tag', msg.isSelf ? 'ml-auto mr-1' : 'mr-auto ml-1', msg.shouldAnimate ? 'animate-message-fade-in' : '']">
                                     {{ msg.name || (msg.role === 'user' ? user.name : (currentCharacter?.name || 'Unknown')) }}
                                 </div>
                                 <!-- Message Bubble -->
@@ -838,7 +853,7 @@
 
                                     <!-- Message Actions -->
                                     <div v-if="!msg.isEditing_Message && !isMessageThinkingOrRunning(msg) && !(index === chatHistory.length - 1 && !msg.isSelf && (isGenerating || isRemoteGenerating)) && !(msg.isSelf && isConversationBusy && !chatHistory.slice(index + 1).some(m => m.isSelf))"
-                                        :class="['message-action-bar absolute bottom-0 -mb-11 md:-mb-12 flex items-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-200', msg.isSelf ? 'right-0' : 'left-0']">
+                                        :class="['message-action-bar absolute bottom-0 -mb-9 md:-mb-10 flex items-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-200', msg.isSelf ? 'right-0' : 'left-0']">
                                         <button v-if="index === chatHistory.length - 1"
                                             @click="regenerateMessage(index)"
                                             class="message-action-button"
@@ -900,7 +915,7 @@
                             </div>
                             <div :class="['flex flex-col min-w-0 items-start', settings.immersiveMode ? 'immersive-message-column' : '']">
                                 <div v-show="!settings.immersiveMode"
-                                    class="text-[10px] font-bold text-gray-600 mb-1 select-none px-1.5 py-0.5 rounded-md bg-white/50 backdrop-blur-sm border border-white/20 w-fit shadow-sm mr-auto ml-1 truncate max-w-[150px] md:max-w-[250px] msg-name-tag animate-message-in"
+                                    class="text-[10px] font-bold text-gray-600 mb-1 select-none px-1.5 py-0.5 rounded-md bg-white/50 backdrop-blur-sm border border-white/20 w-fit shadow-sm mr-auto ml-1 truncate max-w-[210px] md:max-w-[250px] msg-name-tag animate-message-in"
                                     style="animation-delay: 100ms;">
                                     {{ currentCharacter.name }}
                                 </div>
@@ -919,6 +934,10 @@
                     </div>
                 </div>
 
+                <div v-if="imageActionMenu.show" class="chat-image-action-menu" :style="{ left: imageActionMenu.x + 'px', top: imageActionMenu.y + 'px' }" @click.stop>
+                    <button type="button" @click="shareChatImage">分享图片</button>
+                    <button type="button" @click="regenerateChatImage">重新生成图片</button>
+                </div>
 
                 <!-- Input Area (Floating Island) -->
                 <div
@@ -1445,6 +1464,78 @@
                         加载更多角色 ({{ filteredCharacters.length - characterDisplayLimit }})
                     </button>
                 </div>
+            </div>
+
+            <!-- Image Library View -->
+            <div v-if="currentView === 'images'" class="management-view image-library-view">
+                <div class="max-w-6xl mx-auto">
+                    <div class="flex items-center gap-3 mb-6">
+                        <button @click="toggleMobileMenu" class="mobile-menu-button">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor"><use href="#icon-menu"></use></svg>
+                        </button>
+                        <div>
+                            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-primary-500">角色私有图册</p>
+                            <h2 class="text-2xl md:text-3xl font-bold text-gray-900">图片管理</h2>
+                            <p class="text-sm text-gray-500 mt-1">先选择角色卡，再查看该角色的聊天生成图片</p>
+                        </div>
+                    </div>
+
+                    <template v-if="!imageLibraryRoleUuid">
+                        <div class="image-library-section-heading">
+                            <div>
+                                <h3 class="text-lg font-bold text-gray-800">选择角色卡</h3>
+                                <p class="text-sm text-gray-500 mt-1">每个角色卡的图片独立保存，互不混用。</p>
+                            </div>
+                            <span class="text-xs text-gray-400">{{ characters.length }} 个角色</span>
+                        </div>
+                        <div v-if="characters.length" class="image-library-character-grid">
+                            <button v-for="character in characters" :key="character.uuid" type="button" class="image-library-character-card" @click="openImageLibraryCharacter(character)">
+                                <img :src="character.avatar" :alt="character.name || '角色卡'" loading="lazy">
+                                <span class="image-library-character-overlay"></span>
+                                <span class="image-library-character-info">
+                                    <strong>{{ character.name || '未命名角色' }}</strong>
+                                    <small>点击查看图片</small>
+                                </span>
+                            </button>
+                        </div>
+                        <div v-else class="image-library-empty">
+                            <div class="image-library-empty-icon">⌁</div>
+                            <h3 class="text-lg font-bold text-gray-800">还没有角色卡</h3>
+                            <p class="text-sm text-gray-500 mt-1 mb-4">请先创建或导入角色卡。</p>
+                            <button @click="currentView = 'characters'" class="px-4 py-2 rounded-xl bg-primary-600 text-white font-semibold">前往角色卡管理</button>
+                        </div>
+                    </template>
+
+                    <template v-else>
+                        <div class="image-library-detail-header">
+                            <button type="button" class="image-library-back-button" @click="closeImageLibraryCharacter">返回角色卡列表</button>
+                            <div v-if="imageLibraryCharacter" class="image-library-character-badge">
+                                <img :src="imageLibraryCharacter.avatar" alt="" class="w-9 h-9 rounded-xl object-cover">
+                                <div class="min-w-0">
+                                    <div class="text-[10px] uppercase tracking-wider text-gray-400">当前角色</div>
+                                    <div class="font-semibold text-gray-800 truncate max-w-[180px]">{{ imageLibraryCharacter.name }}</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="image-library-toolbar">
+                            <div class="segmented-switch segmented-switch--slim image-library-tabs">
+                                <button v-for="item in [{value:'all',label:'全部'},{value:'chat',label:'聊天生成'},{value:'favorite',label:'收藏'}]" :key="item.value" type="button" class="segmented-switch__option" :class="{ 'is-active': imageLibraryCategory === item.value }" @click="setImageLibraryCategory(item.value)">{{ item.label }}</button>
+                            </div>
+                            <div class="relative flex-1 md:max-w-xs">
+                                <input v-model="imageLibrarySearch" type="search" placeholder="搜索提示词..." class="image-library-search">
+                            </div>
+                            <span class="text-xs text-gray-400 whitespace-nowrap">{{ filteredRoleImages.length }} 张</span>
+                        </div>
+                        <div v-if="filteredRoleImages.length" class="image-library-grid">
+                            <article v-for="image in filteredRoleImages" :key="image.id" class="image-library-card">
+                                <button type="button" class="image-library-thumb" @click="imageLibraryPreview = image"><img :src="image.src" alt="生成图片" loading="lazy"><span class="image-library-card-date">{{ new Date(image.createdAt).toLocaleDateString() }}</span></button>
+                                <div class="p-3"><p class="text-xs text-gray-500 line-clamp-2 min-h-[2rem]" :title="image.prompt">{{ image.prompt || '无提示词记录' }}</p><div class="flex items-center justify-between mt-3"><button @click="toggleRoleImageFavorite(image)" class="text-xs font-semibold" :class="image.favorite ? 'text-amber-500' : 'text-gray-400'">{{ image.favorite ? '已收藏' : '收藏' }}</button><button @click="deleteRoleImage(image)" class="text-xs font-semibold text-red-500">删除</button></div></div>
+                            </article>
+                        </div>
+                        <div v-else class="image-library-empty"><div class="image-library-empty-icon">◌</div><h3 class="text-lg font-bold text-gray-800">还没有图片</h3><p class="text-sm text-gray-500 mt-1">在这个角色的聊天中生成图片后，会自动收录到这里。</p></div>
+                    </template>
+                </div>
+                <div v-if="imageLibraryPreview" class="image-library-lightbox" @click.self="imageLibraryPreview = null"><button type="button" class="image-library-lightbox-close" @click="imageLibraryPreview = null">×</button><img :src="imageLibraryPreview.src" :alt="imageLibraryPreview.prompt || '生成图片'"><p v-if="imageLibraryPreview.prompt" class="image-library-lightbox-caption">{{ imageLibraryPreview.prompt }}</p></div>
             </div>
 
             <!-- Generator View -->
@@ -2077,8 +2168,8 @@
                                             class="generation-setting-card">
                                             <label
                                                 class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">自动生图密钥</label>
-                                            <input :value="settings.imageGenMode === 'agnes' ? settings.agnesImageGenKey : settings.imageGenMode === 'openai' ? settings.openaiImageGenKey : settings.imageGenMode === 'vertex' ? settings.vertexImageGenKey : settings.imageGenKey"
-                                                @input="settings.imageGenMode === 'agnes' ? settings.agnesImageGenKey = $event.target.value : settings.imageGenMode === 'openai' ? settings.openaiImageGenKey = $event.target.value : settings.imageGenMode === 'vertex' ? settings.vertexImageGenKey = $event.target.value : settings.imageGenKey = $event.target.value"
+                                            <input :value="settings.imageGenMode === 'agnes' ? settings.agnesImageGenKey : settings.imageGenMode === 'openai' ? settings.openaiImageGenKey : settings.imageGenMode === 'vertex' ? settings.vertexImageGenKey : settings.imageGenMode === 'comfy' ? settings.openaiImageGenKey : settings.imageGenKey"
+                                                @input="settings.imageGenMode === 'agnes' ? settings.agnesImageGenKey = $event.target.value : settings.imageGenMode === 'openai' ? settings.openaiImageGenKey = $event.target.value : settings.imageGenMode === 'vertex' ? settings.vertexImageGenKey = $event.target.value : settings.imageGenMode === 'comfy' ? settings.openaiImageGenKey = $event.target.value : settings.imageGenKey = $event.target.value"
                                                 type="password"
                                                 class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-400 focus:outline-none transition-all shadow-sm"
                                                 placeholder="STA1N-...">
@@ -2093,14 +2184,15 @@
                                                 button-class="rounded-lg px-3 py-1.5 text-sm text-gray-700 focus:border-teal-400 focus:ring-teal-100"
                                                 menu-class="text-sm">
                                             </custom-select>
-                                            <template v-if="settings.imageGenMode === 'openai' || settings.imageGenMode === 'agnes' || settings.imageGenMode === 'vertex'">
+                                            <template v-if="settings.imageGenMode === 'openai' || settings.imageGenMode === 'agnes' || settings.imageGenMode === 'vertex' || settings.imageGenMode === 'comfy'">
                                                 <label
                                                     class="block text-xs font-bold text-gray-500 uppercase tracking-wider mt-3 mb-2">生图服务地址</label>
-                                                <input :value="settings.imageGenMode === 'agnes' ? settings.agnesImageGenUrl : settings.imageGenMode === 'vertex' ? settings.vertexImageGenUrl : settings.openaiImageGenUrl"
-                                                    @input="settings.imageGenMode === 'agnes' ? settings.agnesImageGenUrl = $event.target.value : settings.imageGenMode === 'vertex' ? settings.vertexImageGenUrl = $event.target.value : settings.openaiImageGenUrl = $event.target.value"
+                                            <input :value="settings.imageGenMode === 'agnes' ? settings.agnesImageGenUrl : settings.imageGenMode === 'vertex' ? settings.vertexImageGenUrl : settings.imageGenMode === 'comfy' ? settings.openaiImageGenUrl : settings.openaiImageGenUrl"
+                                                @input="settings.imageGenMode === 'agnes' ? settings.agnesImageGenUrl = $event.target.value : settings.imageGenMode === 'vertex' ? settings.vertexImageGenUrl = $event.target.value : settings.openaiImageGenUrl = $event.target.value"
                                                     type="text"
                                                     class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-400 focus:outline-none transition-all shadow-sm font-mono"
-                                                    :placeholder="settings.imageGenMode === 'agnes' ? '留空使用 Agnes 官方地址：https://apihub.agnes-ai.com' : settings.imageGenMode === 'vertex' ? '例如：https://vertex-proxy-production-6eaa.up.railway.app/v1' : '例：https://your-api.example/v1'">
+                                                    :placeholder="settings.imageGenMode === 'agnes' ? '留空使用 Agnes 官方地址：https://apihub.agnes-ai.com' : settings.imageGenMode === 'vertex' ? '例：https://your-vertex-proxy.example/v1' : settings.imageGenMode === 'comfy' ? '例：http://127.0.0.1:8188' : '例：https://your-api.example/v1'">
+                                                <p v-if="settings.imageGenMode === 'comfy'" class="mt-2 text-xs text-gray-400 leading-relaxed">上游将使用你提供的工作流，页面只传递模型、提示词、画风、比例和数量。</p>
                                                 <label
                                                     class="block text-xs font-bold text-gray-500 uppercase tracking-wider mt-3 mb-2">生图模型</label>
                                                 <div class="relative flex-1 group" @click="openImageGenModelSelector">
@@ -2116,7 +2208,7 @@
                                                     </div>
                                                     <div
                                                         class="w-full bg-gray-50/60 border-2 border-gray-100 rounded-xl pl-11 pr-4 py-3 text-gray-800 font-medium flex items-center justify-between cursor-pointer hover:bg-white hover:border-teal-300 hover:shadow-md transition-all active:scale-[0.99]">
-                                                        <span class="truncate mr-2 font-mono text-sm">{{ settings.imageGenMode === 'vertex' ? 'gemini-3-pro-image' : (settings.imageGenMode === 'agnes' ? settings.agnesImageGenModel : settings.openaiImageGenModel) || '请选择模型' }}</span>
+                                                        <span class="truncate mr-2 font-mono text-sm">{{ settings.imageGenMode === 'vertex' ? settings.vertexImageGenModel : (settings.imageGenMode === 'agnes' ? settings.agnesImageGenModel : (settings.imageGenMode === 'comfy' ? settings.comfyImageGenModel : settings.openaiImageGenModel)) || '请选择模型' }}</span>
                                                         <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor"
                                                             viewBox="0 0 24 24">
                                                             <path stroke-linecap="round" stroke-linejoin="round"
@@ -2136,18 +2228,23 @@
                                                     </svg>
                                                     {{ imageGenModelsLoading ? '刷新中...' : '刷新可用生图模型列表' }}
                                                 </button>
-                                                <p v-if="settings.imageGenMode === 'agnes'"
+                                                <p v-if="settings.imageGenMode === 'comfy'" class="mt-2 text-xs text-gray-400 leading-relaxed">
+                                                    上游接口会接收当前模型、提示词、风格、比例和数量，由你的工作流负责出图。
+                                                </p>
+                                                <p v-else-if="settings.imageGenMode === 'agnes'"
                                                     class="mt-2 text-xs text-gray-400 leading-relaxed">
                                                     Agnes 官方生图，走 <code class="text-gray-500">POST /v1/images/generations</code>，密钥填在上方「自动生图密钥」。
                                                     与 OpenAI 兼容模式的请求体不同，按 Agnes 文档单独适配。
                                                 </p>
                                                 <p v-else-if="settings.imageGenMode === 'vertex'" class="mt-2 text-xs text-gray-400 leading-relaxed">
-                                                    Vertex Gemini 专用模式，固定使用 <code class="text-gray-500">gemini-3-pro-image</code>，按 Gemini 的 aspectRatio 控制比例。
+                                                    Vertex Gemini 专用模式，走 <code class="text-gray-500">POST /v1/images/generations</code>，按 Gemini 的 aspectRatio 控制比例。
+                                                    请填写自己的服务地址与密钥，再点击「刷新可用生图模型列表」获取模型。
                                                 </p>
                                                 <p v-else class="mt-2 text-xs text-gray-400 leading-relaxed">
                                                     走 <code class="text-gray-500">POST /v1/images/generations</code>，密钥填在上方「自动生图密钥」。
                                                     生成结果按提示词缓存，重复浏览不会重复计费。
                                                 </p>
+                                                </template>
                                             </template>
                                             <template v-else>
                                                 <p class="mt-3 text-xs text-gray-400 leading-relaxed">
@@ -2301,6 +2398,70 @@
                                         <input type="range" v-model.number="settings.fontSize" min="12" max="24"
                                             step="1"
                                             class="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-500 hover:accent-indigo-400 transition-all">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Storage Management -->
+                            <div class="pt-6 border-t border-gray-100 mt-6">
+                                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+                                    <div>
+                                        <h4 class="settings-section-heading !mb-0">
+                                            <svg class="w-4 h-4 mr-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                    d="M4 7c0 1.1 3.58 2 8 2s8-.9 8-2m-16 0c0-1.1 3.58-2 8-2s8 .9 8 2m-16 0v5c0 1.1 3.58 2 8 2s8-.9 8-2V7m-16 5v5c0 1.1 3.58 2 8 2s8-.9 8-2v-5">
+                                                </path>
+                                            </svg>
+                                            空间管理
+                                        </h4>
+                                    </div>
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <button type="button" @click="refreshStorageStats"
+                                            :disabled="storageStats.loading || storageStats.cleaning"
+                                            class="px-4 py-2.5 text-sm font-bold text-gray-600 bg-white border border-gray-200 rounded-xl shadow-sm hover:bg-gray-50 hover:shadow-md active:scale-95 transition-all disabled:opacity-40 disabled:shadow-none">
+                                            {{ storageStats.loading ? '统计中...' : (storageStats.hasMeasured ? '重新统计' : '统计') }}
+                                        </button>
+                                        <button type="button" @click="cleanupUnusedStorage"
+                                            :disabled="storageStats.loading || storageStats.cleaning || storageStats.orphanedItems === 0"
+                                            class="px-4 py-2.5 text-sm font-bold text-red-600 bg-white border border-gray-200 rounded-xl shadow-sm hover:bg-red-50 hover:border-red-100 hover:shadow-md active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none">
+                                            {{ storageStats.cleaning ? '清理中...' : '清理无用残留（' + formatStorageSize(storageStats.orphanedBytes) + '）' }}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div v-if="storageStats.error"
+                                    class="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600">
+                                    {{ storageStats.error }}
+                                </div>
+                                <div v-else class="space-y-6">
+                                    <div>
+                                        <div class="flex items-center justify-between gap-3 mb-3 text-sm">
+                                            <span class="font-bold text-gray-600">网页存储空间</span>
+                                            <span class="font-semibold text-gray-500 whitespace-nowrap">
+                                                <span class="text-gray-700">{{ formatStorageSize(storageStats.usage) }}</span>
+                                                <span class="mx-1 text-gray-300">/</span>
+                                                <span>{{ storageStats.quota ? formatStorageSize(storageStats.quota) : '未知' }}</span>
+                                            </span>
+                                        </div>
+                                        <div class="h-3 rounded-full bg-gray-200 overflow-hidden">
+                                            <div class="h-full rounded-full bg-primary-500 transition-all duration-300"
+                                                :style="{ width: Math.min(100, Math.max(storageStats.usage ? 1 : 0, storageStats.quota ? storageStats.usage / storageStats.quota * 100 : 0)) + '%' }"></div>
+                                        </div>
+                                    </div>
+
+                                    <div v-if="storageStats.categories.length"
+                                        class="border-y border-gray-100 divide-y divide-gray-100">
+                                        <div v-for="category in storageStats.categories" :key="category.key"
+                                            class="flex items-center justify-between gap-4 py-3.5 text-sm">
+                                            <div class="flex items-center min-w-0 text-gray-600">
+                                                <span class="w-1 h-5 rounded-full mr-3 flex-shrink-0"
+                                                    :style="{ backgroundColor: category.color }"></span>
+                                                <span class="truncate">{{ category.label }}</span>
+                                            </div>
+                                            <span class="font-semibold text-gray-600 tabular-nums whitespace-nowrap">
+                                                {{ formatStorageSize(category.bytes) }}
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -3230,6 +3391,50 @@
                                 </button>
                             </div>
 
+                            <div v-if="memorySettings.mode === 'classic'" class="settings-field">
+                                <div class="relative mb-2 flex items-center">
+                                    <label class="text-sm font-semibold text-gray-700">总结程度</label>
+                                    <button type="button"
+                                        @click.stop="settingsHelpTopic = settingsHelpTopic === 'summaryLevel' ? '' : 'summaryLevel'"
+                                        class="settings-help-trigger"
+                                        :class="{ 'is-open': settingsHelpTopic === 'summaryLevel' }"
+                                        :aria-expanded="settingsHelpTopic === 'summaryLevel'"
+                                        aria-label="查看总结程度说明">
+                                        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                d="M9.1 9a3 3 0 115.8 1.1c-.6 1.1-1.9 1.3-2.5 2.2-.3.4-.4.8-.4 1.2M12 17h.01"></path>
+                                        </svg>
+                                    </button>
+                                    <div v-if="settingsHelpTopic === 'summaryLevel'" class="settings-help-popover">
+                                        <span class="settings-help-popover-content">控制每轮总结的目标篇幅。不同模型对中文字数的理解和遵循能力不同，实际结果可能略有偏差。</span>
+                                    </div>
+                                </div>
+                                <div class="segmented-switch segmented-switch--compact segmented-switch--three w-full">
+                                    <div class="segmented-switch__indicator" :class="{
+                                        'is-position-2': memorySettings.summaryLevel === 'balanced',
+                                        'is-position-3': memorySettings.summaryLevel === 'detailed'
+                                    }"></div>
+                                    <button type="button" @click="memorySettings.summaryLevel = 'concise'"
+                                        class="segmented-switch__option"
+                                        :class="{ 'is-active': memorySettings.summaryLevel === 'concise' }"
+                                        aria-label="精简总结，50 到 80 字">
+                                        精简
+                                    </button>
+                                    <button type="button" @click="memorySettings.summaryLevel = 'balanced'"
+                                        class="segmented-switch__option"
+                                        :class="{ 'is-active': memorySettings.summaryLevel === 'balanced' }"
+                                        aria-label="均衡总结，100 到 130 字">
+                                        均衡
+                                    </button>
+                                    <button type="button" @click="memorySettings.summaryLevel = 'detailed'"
+                                        class="segmented-switch__option"
+                                        :class="{ 'is-active': memorySettings.summaryLevel === 'detailed' }"
+                                        aria-label="详细总结，200 到 250 字">
+                                        详细
+                                    </button>
+                                </div>
+                            </div>
+
                             <div v-if="memorySettings.mode === 'classic'" class="relative bg-gray-50/60 p-3 rounded-xl border border-gray-100">
                                 <div class="flex justify-between items-center mb-2">
                                     <div class="relative flex items-center">
@@ -3408,11 +3613,24 @@
                                         <span class="h-1.5 w-1.5 rounded-full bg-primary-500"></span>
                                         <span class="text-sm font-medium text-gray-800">第 {{ memory.displayTurn || '?' }} 轮</span>
                                     </div>
-                                    <div class="flex items-baseline gap-1 text-[13px] font-medium text-gray-400"
-                                        title="本轮原始正文 → 使用总结后的正文">
-                                        <span>{{ Number(memory.originalChars || 0).toLocaleString() }}字</span>
-                                        <span class="text-gray-300" aria-hidden="true">→</span>
-                                        <span class="font-medium leading-none text-gray-700">{{ Number(memory.compressedChars || 0).toLocaleString() }}字</span>
+                                    <div class="flex items-center gap-2">
+                                        <div class="flex items-baseline gap-1 text-[13px] font-medium text-gray-400"
+                                            title="本轮原始正文 → 使用总结后的正文">
+                                            <span>{{ Number(memory.originalChars || 0).toLocaleString() }}字</span>
+                                            <span class="text-gray-300" aria-hidden="true">→</span>
+                                            <span class="font-medium leading-none text-gray-700">{{ Number(memory.compressedChars || 0).toLocaleString() }}字</span>
+                                        </div>
+                                        <button type="button" @click="retryClassicMemory(memory)"
+                                            :disabled="Boolean(retryingClassicMemoryId) || isAnyMemoryProcessing"
+                                            class="inline-flex h-7 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 text-xs font-medium text-gray-600 transition-colors hover:border-primary-200 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                            :title="retryingClassicMemoryId === memory.id ? '正在重新生成' : '重新生成这条总结'">
+                                            <svg class="h-3.5 w-3.5" :class="{ 'animate-spin': retryingClassicMemoryId === memory.id }"
+                                                fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                    d="M4 4v6h6M20 20v-6h-6M5.1 15a7 7 0 0011.3 2.4L20 14M4 10l3.6-3.4A7 7 0 0118.9 9"></path>
+                                            </svg>
+                                            <span>{{ retryingClassicMemoryId === memory.id ? '重试中' : '重试' }}</span>
+                                        </button>
                                     </div>
                                 </div>
                                 <div class="rounded-lg border border-primary-100 bg-primary-50/50 px-3 py-2.5">
