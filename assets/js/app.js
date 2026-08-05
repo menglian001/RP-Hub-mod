@@ -12093,8 +12093,25 @@ image###生成的提示词###
 
         const checkAnnouncement = async () => {
             try {
-                const currentVersion = (typeof window.RPHubNative !== 'undefined' && window.RPHubNative.contentVersion)
-                    ? window.RPHubNative.contentVersion() : 0;
+                // 优先通过 NativeBridge 获取（App 内 https://localhost 无法跨域 fetch）
+                if (typeof window.RPHubNative !== 'undefined' && window.RPHubNative.getAnnouncement) {
+                    const raw = window.RPHubNative.getAnnouncement();
+                    if (!raw) return;
+                    const manifest = JSON.parse(raw);
+                    const remoteVersion = manifest.version || 0;
+                    const notes = manifest.notes || '';
+                    if (!remoteVersion || !notes) return;
+                    const lastRead = parseInt(localStorage.getItem('announcement_read_version') || '0', 10);
+                    if (remoteVersion > lastRead) {
+                        const currentVersion = window.RPHubNative.contentVersion
+                            ? window.RPHubNative.contentVersion() : 0;
+                        announcementDialog.value = {
+                            visible: true, version: remoteVersion, currentVersion, notes
+                        };
+                    }
+                    return;
+                }
+                // 浏览器环境：直接 fetch version.json
                 const base = 'https://rp-hub-mod.pages.dev';
                 const resp = await fetch(`${base}/version.json?t=${Date.now()}`);
                 if (!resp.ok) return;
@@ -12105,7 +12122,7 @@ image###生成的提示词###
                 const lastRead = parseInt(localStorage.getItem('announcement_read_version') || '0', 10);
                 if (remoteVersion > lastRead) {
                     announcementDialog.value = {
-                        visible: true, version: remoteVersion, currentVersion, notes
+                        visible: true, version: remoteVersion, currentVersion: 0, notes
                     };
                 }
             } catch (e) {
