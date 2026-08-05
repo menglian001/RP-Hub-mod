@@ -12147,6 +12147,9 @@ image###生成的提示词###
             announcementDialog.value.visible = false;
         };
 
+        // 暴露到全局，让原生层在 checkUpdate 完成后主动触发
+        window.checkAnnouncement = checkAnnouncement;
+
         // Lifecycle
         onMounted(async () => {
             document.addEventListener('fullscreenchange', syncChatFullscreenState);
