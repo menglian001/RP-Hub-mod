@@ -12095,20 +12095,27 @@ image###生成的提示词###
             try {
                 // 优先通过 NativeBridge 获取（App 内 https://localhost 无法跨域 fetch）
                 if (typeof window.RPHubNative !== 'undefined' && window.RPHubNative.getAnnouncement) {
-                    const raw = window.RPHubNative.getAnnouncement();
-                    if (!raw) return;
-                    const manifest = JSON.parse(raw);
-                    const remoteVersion = manifest.version || 0;
-                    const notes = manifest.notes || '';
-                    if (!remoteVersion || !notes) return;
-                    const lastRead = parseInt(localStorage.getItem('announcement_read_version') || '0', 10);
-                    if (remoteVersion > lastRead) {
-                        const currentVersion = window.RPHubNative.contentVersion
-                            ? window.RPHubNative.contentVersion() : 0;
-                        announcementDialog.value = {
-                            visible: true, version: remoteVersion, currentVersion, notes
-                        };
-                    }
+                    const showFromNative = (raw) => {
+                        if (!raw) return false;
+                        try {
+                            const manifest = JSON.parse(raw);
+                            const remoteVersion = manifest.version || 0;
+                            const notes = manifest.notes || '';
+                            if (!remoteVersion || !notes) return false;
+                            const lastRead = parseInt(localStorage.getItem('announcement_read_version') || '0', 10);
+                            if (remoteVersion <= lastRead) return false;
+                            const currentVersion = window.RPHubNative.contentVersion
+                                ? window.RPHubNative.contentVersion() : 0;
+                            announcementDialog.value = {
+                                visible: true, version: remoteVersion, currentVersion, notes
+                            };
+                            return true;
+                        } catch (e) { return false; }
+                    };
+                    // 第一次尝试：App 刚启动时 checkUpdate 可能还没完成
+                    if (showFromNative(window.RPHubNative.getAnnouncement())) return;
+                    // 延迟重试：等 checkUpdate 读完 version.json 后再取一次
+                    setTimeout(() => showFromNative(window.RPHubNative.getAnnouncement()), 3000);
                     return;
                 }
                 // 浏览器环境：直接 fetch version.json
