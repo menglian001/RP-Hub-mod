@@ -387,19 +387,19 @@ createApp({
                     requestBody.extra_body = { response_format: 'url' };
                 }
             } else {
+                // OpenAI 兼容模式：只发标准字段，不塞 SD 专有参数。
+                // 第三方中转站通常只认 prompt / n / size / model / response_format，
+                // 多塞 negative_prompt / steps / cfg_scale 等会直接 400。
                 requestBody = {
                     prompt: fullPrompt,
                     n: options.image_count || 1,
                     size: options.size || getOpenAIImageSize(),
-                    style,
-                    negative_prompt: options.negative_prompt || DEFAULT_IMAGE_GEN_NEGATIVE,
-                    steps: options.steps || 25,
-                    cfg_scale: options.cfg_scale || 7,
-                    sampler_name: options.sampler_name || 'euler',
-                    scheduler: options.scheduler || 'normal',
-                    seed: options.seed ?? -1,
                     response_format: responseFormat
                 };
+                // style 只在用户明确选了 vivid/natural 时才发，不把 artists 字符串填进去
+                if (style && (style === 'vivid' || style === 'natural')) {
+                    requestBody.style = style;
+                }
             }
             if (imageGenModel) requestBody.model = imageGenModel;
             const response = await fetch(getImageGenApiEndpoint(), {
@@ -427,12 +427,13 @@ createApp({
             const fullPrompt = [prompt, artists].map(part => String(part || '').trim()).filter(Boolean).join(', ');
             const signal = options.signal;
             try {
-                return await postOpenAIImage(fullPrompt, 'b64_json', signal, artists);
+                return await postOpenAIImage(fullPrompt, 'b64_json', signal, '', options);
             } catch (error) {
-                // 少数服务不认 b64_json，只在这种参数错误上退回 url
-                const unsupported = error && error.status === 400 && /response_format|b64_json/i.test(String(error.detail || ''));
-                if (!unsupported) throw error;
-                return postOpenAIImage(fullPrompt, 'url', signal, artists);
+                // 任何 400 错误都退回 url 格式重试一次（b64_json 不被很多服务支持）
+                if (error && error.status === 400) {
+                    return postOpenAIImage(fullPrompt, 'url', signal, '', options);
+                }
+                throw error;
             }
         };
 
@@ -440,10 +441,9 @@ createApp({
         const requestComfyImage = async (prompt, options = {}) => {
             const artists = options.withArtists === false ? '' : getImageGenArtists();
             const fullPrompt = [prompt, artists].map(part => String(part || '').trim()).filter(Boolean).join(', ');
-            return postOpenAIImage(fullPrompt, 'b64_json', options.signal, artists, {
+            return postOpenAIImage(fullPrompt, 'b64_json', options.signal, '', {
                 image_count: Math.min(6, Math.max(1, Number(settings.imageGenCount) || 1)),
-                size: getOpenAIImageSize(),
-                negative_prompt: DEFAULT_IMAGE_GEN_NEGATIVE
+                size: getOpenAIImageSize()
             });
         };
 
@@ -665,6 +665,8 @@ createApp({
             img.dataset.imagegenState = 'loading';
             img.alt = '生成图片(重新生成中)';
             img.src = createImageGenStatusSrc('loading', '', Date.now());
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 120000);
             try {
                 const url = getImageGenMode() === IMAGE_GEN_MODE_GET
                     ? `${buildImageGenUrl({
@@ -674,8 +676,8 @@ createApp({
                         size: settings.imageSize
                     })}${buildImageGenUrl({ prompt }).includes('?') ? '&' : '?'}regenerate=${Date.now()}`
                     : isComfyImageGenMode()
-                        ? await requestComfyImage(prompt)
-                        : await requestOpenAIImage(prompt);
+                        ? await requestComfyImage(prompt, { signal: controller.signal })
+                        : await requestOpenAIImage(prompt, { signal: controller.signal });
                 await replaceRoleImageSource(roleUuid, oldSrc, prompt, url);
                 img.src = url;
                 img.dataset.imagegenState = 'done';
@@ -685,7 +687,10 @@ createApp({
                 img.src = oldSrc;
                 img.dataset.imagegenState = 'done';
                 img.alt = '生成图片';
-                showToast('图片重新生成失败，已保留原图', 'error');
+                const msg = error && error.name === 'AbortError' ? '生图超时，请重试' : '图片重新生成失败，已保留原图';
+                showToast(msg, 'error');
+            } finally {
+                clearTimeout(timeout);
             }
         };
 
