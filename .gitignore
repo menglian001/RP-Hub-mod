@@ -1,3 +1,11 @@
 .DS_Store
 Thumbs.db
 *.log
+
+# 前端第三方库（由 CI 执行 tools/fetch-vendor.sh 生成，不入库）
+assets/vendor/
+
+# 热更新打包产物（由 CI 生成，不入库）
+dist/
+/content.zip
+/version.json

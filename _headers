@@ -1,0 +1,7 @@
+/content.zip
+  Content-Type: application/zip
+  Cache-Control: public, max-age=60
+
+/version.json
+  Content-Type: application/json
+  Cache-Control: no-store
