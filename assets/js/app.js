@@ -1346,9 +1346,24 @@ createApp({
         };
 
         // Listen for workshop ready message to trigger sync
-        window.addEventListener('message', (event) => {
-            if (event.data && event.data.type === 'WORKSHOP_READY') {
+        window.addEventListener('message', async (event) => {
+            if (!event.data) return;
+            if (event.data.type === 'WORKSHOP_READY') {
                 syncSettingsToGenerator();
+            }
+            // 角色卡工坊 iframe 请求主界面代为生图（POST 模式）。
+            // 工坊自身只实现了 GET 直链，第三方接口走这里桥接到已有的多模式函数。
+            if (event.data.type === 'WORKSHOP_GENERATE_IMAGE') {
+                const { id, prompt } = event.data;
+                const iframe = document.querySelector('iframe[src*="character"]');
+                try {
+                    const url = await resolveGeneratedImage(String(prompt || ''));
+                    iframe?.contentWindow?.postMessage(
+                        { type: 'WORKSHOP_GENERATE_IMAGE_RESULT', id, url }, '*');
+                } catch (error) {
+                    iframe?.contentWindow?.postMessage(
+                        { type: 'WORKSHOP_GENERATE_IMAGE_RESULT', id, error: String(error.message || error) }, '*');
+                }
             }
         });
 
