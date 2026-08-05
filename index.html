@@ -3928,6 +3928,44 @@
             </div>
         </div>
 
+        <!-- Announcement Modal -->
+        <div v-if="announcementDialog.visible"
+            class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
+            @click.self="dismissAnnouncement">
+            <div class="bg-white rounded-xl border border-gray-200 w-full max-w-sm flex flex-col shadow-2xl transform transition-all scale-100">
+                <div class="p-5 border-b border-gray-100 flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-full bg-primary-50 flex items-center justify-center flex-shrink-0">
+                        <svg class="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5.882V19.118a1 1 0 001.7.7l3.3-2.818a1 1 0 01.65-.236H18a2 2 0 002-2V8a2 2 0 00-2-2h-1.35a1 1 0 01-.65-.236l-3.3-2.818a1 1 0 00-1.7.7z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-semibold text-gray-900">内容更新公告</h3>
+                        <p class="text-xs text-gray-400 mt-0.5">v{{ announcementDialog.version }}</p>
+                    </div>
+                </div>
+                <div class="p-5">
+                    <p class="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">{{ announcementDialog.notes }}</p>
+                    <p v-if="announcementDialog.currentVersion > 0 && announcementDialog.currentVersion < announcementDialog.version"
+                        class="text-xs text-amber-600 mt-3 flex items-center gap-1">
+                        <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9 9a1 1 0 011-1h.01a1 1 0 110 2H10a1 1 0 01-1-1zm.01 4a1 1 0 102 0 1 1 0 11-2 0z" clip-rule="evenodd" fill-rule="evenodd"/></svg>
+                        正在后台更新，重启后生效
+                    </p>
+                    <p v-else-if="announcementDialog.currentVersion > 0"
+                        class="text-xs text-green-600 mt-3 flex items-center gap-1">
+                        <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                        已是最新版本
+                    </p>
+                </div>
+                <div class="bg-gray-50 px-5 py-3 flex justify-end rounded-b-xl">
+                    <button @click="dismissAnnouncement" type="button"
+                        class="px-4 py-2 rounded-lg bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 transition-colors">
+                        知道了
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- Model Selector Modal -->
         <transition name="fade">
             <div v-if="showModelSelector"

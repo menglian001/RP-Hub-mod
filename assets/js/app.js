@@ -12088,6 +12088,36 @@ image###生成的提示词###
             await generateResponse(startTime);
         };
 
+        // --- 公告系统：启动时检查线上版本，有新公告则弹窗 ---
+        const announcementDialog = ref({ visible: false, version: 0, currentVersion: 0, notes: '' });
+
+        const checkAnnouncement = async () => {
+            try {
+                const currentVersion = (typeof window.RPHubNative !== 'undefined' && window.RPHubNative.contentVersion)
+                    ? window.RPHubNative.contentVersion() : 0;
+                const base = 'https://rp-hub-mod.pages.dev';
+                const resp = await fetch(`${base}/version.json?t=${Date.now()}`);
+                if (!resp.ok) return;
+                const manifest = await resp.json();
+                const remoteVersion = manifest.versionCode || 0;
+                const notes = manifest.notes || '';
+                if (!remoteVersion || !notes) return;
+                const lastRead = parseInt(localStorage.getItem('announcement_read_version') || '0', 10);
+                if (remoteVersion > lastRead) {
+                    announcementDialog.value = {
+                        visible: true, version: remoteVersion, currentVersion, notes
+                    };
+                }
+            } catch (e) {
+                console.log('公告检查失败:', e);
+            }
+        };
+
+        const dismissAnnouncement = () => {
+            localStorage.setItem('announcement_read_version', String(announcementDialog.value.version));
+            announcementDialog.value.visible = false;
+        };
+
         // Lifecycle
         onMounted(async () => {
             document.addEventListener('fullscreenchange', syncChatFullscreenState);
@@ -12099,6 +12129,7 @@ image###生成的提示词###
             fetchQuota(); // Fetch quota after saved settings are loaded
 
             checkUpdate(); // Check for updates — 必须在 loadData 之后，否则 localStorage 代理中的 update_id 还未从服务端加载
+            checkAnnouncement(); // 检查线上公告
 
             // --- 全局清理废弃正则 (思维隐藏及旧版画图迁移项已清理完毕，保留基础结构) ---
             const obsoleteRegexNames = ['隐藏正文的thinking', 'Nai画图正则-本子风', 'Nai画图正则-竖图'];
@@ -13485,6 +13516,8 @@ ${uiTemplateAnalysisSection}
 
             // Auto Image Gen Inquiry
             showAutoImageGenModal,
+
+            announcementDialog, dismissAnnouncement, // 公告系统
 
             setAutoImageGen: (enabled) => {
                 const autoImageGenWIName = '自动生图';
