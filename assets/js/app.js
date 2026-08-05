@@ -3403,9 +3403,6 @@ createApp({
         // OpenAI 兼容模式下画师/尺寸不写进 replacement，改动无从对比，这里单独记一份用于提示
         let openAIImageGenAppliedArtists;
         let openAIImageGenAppliedSize;
-        // 切换生图比例/风格时只更新正则模板（供后续新消息使用），不清空渲染缓存，
-        // 避免已有图片被全部重新生成。用户可通过手动重新生成功能逐张更新。
-        let suppressRenderCacheClear = false;
 
         const updateImageGenRegexState = ({ enableRegex = false } = {}) => {
             const imageGenRegexName = 'NAI画图正则';
@@ -3503,8 +3500,6 @@ createApp({
 
         watch(() => settings.imageSize, () => {
             if (isAutoImageGenEnabled.value) {
-                suppressRenderCacheClear = true;
-                nextTick(() => { suppressRenderCacheClear = false; });
                 const messages = updateImageGenRegexState({ enableRegex: true });
                 if (messages && messages.length > 0) {
                     showToast('生图比例已切换：' + messages.join('，'), 'success');
@@ -4900,7 +4895,6 @@ ${content}
         };
         const htmlFrameDetectionCache = new Map();
         watch(() => [settings.disableImages, regexScripts.value], () => {
-            if (suppressRenderCacheClear) return;
             renderMarkdownCache.clear();
             htmlFrameDetectionCache.clear();
         }, { deep: true });
