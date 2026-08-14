@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg">#0F172A</color>
+    <!-- 启动时的窗口底色。网页本体是浅色（#f9fafb），
+         这里若用深色会在首屏出现一闪的黑底与上下黑边。 -->
+    <color name="bg">#F9FAFB</color>
 </resources>

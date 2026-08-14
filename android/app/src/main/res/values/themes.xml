@@ -1,8 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <style name="Theme.RPHub" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:windowBackground">@color/bg</item>
-        <item name="android:statusBarColor">@color/bg</item>
-        <item name="android:navigationBarColor">@color/bg</item>
+
+        <!-- 全屏：系统栏透明，内容边到边铺满。
+             实际的隐藏由 MainActivity.enableFullscreen() 完成，
+             这里保证在系统栏被临时唤出时也不会出现色块边框。 -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowTranslucentStatus">false</item>
+        <item name="android:windowTranslucentNavigation">false</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="27">shortEdges</item>
+
+        <!-- 网页是浅色底，系统栏图标需用深色才看得清 -->
+        <item name="android:windowLightStatusBar" tools:targetApi="23">true</item>
+        <item name="android:enforceNavigationBarContrast" tools:targetApi="29">false</item>
+        <item name="android:enforceStatusBarContrast" tools:targetApi="29">false</item>
     </style>
 </resources>

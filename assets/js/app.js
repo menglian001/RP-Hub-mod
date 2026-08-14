@@ -10416,6 +10416,21 @@ const app = createApp({
             document.addEventListener('fullscreenchange', syncChatFullscreenState);
             document.addEventListener('webkitfullscreenchange', syncChatFullscreenState);
 
+            // Android 壳的返回键回调。壳内是单页应用，WebView 没有历史记录，
+            // 原来按返回键只能直接退出 App，进了图片管理这类管理页就出不来。
+            // 返回 true 表示网页已处理，壳不再退出。
+            window.RPHubHandleBack = () => {
+                if (imageLibraryPreview.value) { imageLibraryPreview.value = null; return true; }
+                if (showImageGenModelSelector.value) { showImageGenModelSelector.value = false; return true; }
+                if (showModelSelector.value) { showModelSelector.value = false; return true; }
+                if (currentView.value === 'images' && imageLibraryRoleUuid.value) {
+                    imageLibraryRoleUuid.value = '';
+                    return true;
+                }
+                if (currentView.value !== 'chat') { currentView.value = 'chat'; return true; }
+                return false;
+            };
+
             await loadData();
             fetchQuota(); // Fetch quota after saved settings are loaded
 

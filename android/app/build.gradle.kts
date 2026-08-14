@@ -13,8 +13,8 @@ android {
         applicationId = "cc.salarycat.rphub"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
-        versionName = "2.0.0"
+        versionCode = 3
+        versionName = "2.1.0"
 
         // 内置内容的版本号，需与 assets/web/version.json 中的 versionCode 一致
         buildConfigField("int", "BUNDLED_CONTENT_VERSION", "${project.findProperty("bundledContentVersion") ?: 0}")

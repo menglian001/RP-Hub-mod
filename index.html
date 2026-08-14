@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport"
-        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content, viewport-fit=cover">
     <!-- <meta name="rphub-presence-api" content="https://rphub-presence.zeabur.app"> -->
     <title>RP Hub</title>
     <!-- GitHub Pages rebuild marker for CSS-only animation update. -->
@@ -2248,7 +2248,14 @@
                 <div class="p-4 md:p-6">
                     <div v-if="!imageLibraryRoleUuid">
                         <div class="image-library-section-heading">
-                            <h2 class="text-2xl md:text-3xl font-bold text-gray-900">图片管理</h2>
+                            <div class="flex items-center">
+                                <button @click="toggleMobileMenu" class="mobile-menu-button">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor"><use href="#icon-menu"></use></svg>
+                                </button>
+                                <h2 class="text-2xl md:text-3xl font-bold text-gray-900">图片管理</h2>
+                            </div>
+                            <button type="button" class="image-library-back-button"
+                                @click="currentView = 'chat'">返回聊天</button>
                         </div>
                         <div v-if="characters.length" class="image-library-character-grid">
                             <button v-for="(character, index) in characters" :key="character.uuid || index"
@@ -2269,8 +2276,15 @@
                     </div>
                     <div v-else>
                         <div class="image-library-detail-header">
+                            <div class="flex items-center">
+                                <button @click="toggleMobileMenu" class="mobile-menu-button">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor"><use href="#icon-menu"></use></svg>
+                                </button>
+                                <button type="button" class="image-library-back-button"
+                                    @click="imageLibraryRoleUuid = ''">返回角色卡列表</button>
+                            </div>
                             <button type="button" class="image-library-back-button"
-                                @click="imageLibraryRoleUuid = ''">返回角色卡列表</button>
+                                @click="currentView = 'chat'">返回聊天</button>
                         </div>
                         <div class="image-library-toolbar">
                             <div class="segmented-switch segmented-switch--slim image-library-tabs">

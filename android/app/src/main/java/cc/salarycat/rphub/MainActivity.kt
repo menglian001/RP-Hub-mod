@@ -4,10 +4,12 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.ConsoleMessage
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
@@ -22,6 +24,9 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.WebViewAssetLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -68,6 +73,10 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // 全屏：内容画到系统栏底下并隐藏状态栏/导航栏。
+        // 旧版只把两条栏染成 #0F172A，网页是浅色的，看起来就是上下各一条黑边。
+        enableFullscreen()
+
         // 关键：在 WebView 加载之前完成提升，首屏就是新内容。
         // 旧壳把提升放在弹窗回调里，弹窗不出现就永远卡住。
         try {
@@ -95,6 +104,31 @@ class MainActivity : AppCompatActivity() {
         webView.loadUrl(HOME_URL)
 
         checkUpdate(silent = true)
+    }
+
+    /**
+     * 真全屏：边到边布局 + 隐藏系统栏，从边缘上划可临时唤出。
+     * 刘海屏还要允许内容延伸进挖孔区，否则横屏时那一侧仍是黑条。
+     */
+    private fun enableFullscreen() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // 切回前台、关闭输入法或系统弹窗后系统栏会自己冒出来，重新藏起来
+        if (hasFocus) enableFullscreen()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -220,9 +254,34 @@ class MainActivity : AppCompatActivity() {
                     webView.goBack()
                     return
                 }
-                finish()
+                // 单页应用没有历史记录，先问网页要不要自己消化这次返回
+                // （关弹窗、退出图片管理等），网页说没处理才退出 App。
+                askWebToHandleBack { handled -> if (!handled) finish() }
             }
         })
+    }
+
+    /**
+     * 询问网页侧的 window.RPHubHandleBack()。
+     * 网页没定义、抛异常或超时都视为未处理，避免返回键失灵按不动。
+     */
+    private fun askWebToHandleBack(onResult: (Boolean) -> Unit) {
+        var settled = false
+        val finish = { handled: Boolean ->
+            if (!settled) {
+                settled = true
+                onResult(handled)
+            }
+        }
+        webView.postDelayed({ finish(false) }, 400)
+        try {
+            webView.evaluateJavascript(
+                "(function(){try{return !!(window.RPHubHandleBack&&window.RPHubHandleBack());}catch(e){return false;}})()"
+            ) { value -> finish(value == "true") }
+        } catch (e: Exception) {
+            Log.w(TAG, "返回键询问网页失败: ${e.message}")
+            finish(false)
+        }
     }
 
     /**
