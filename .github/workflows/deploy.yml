@@ -1,0 +1,47 @@
+name: Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # 需要完整历史来计算内容版本号
+          fetch-depth: 0
+
+      - name: 补全前端依赖
+        run: |
+          if [ ! -f assets/vendor/vue.global.prod.js ]; then
+            bash tools/fetch-vendor.sh
+          else
+            echo "vendor 已存在，跳过下载"
+          fi
+
+      - name: 打包内容更新包
+        run: |
+          # 用提交总数作为内容版本号，保证每次推送都单调递增，
+          # 已安装 App 的用户由此自动获取新内容，无需重装。
+          CODE="$(git rev-list --count HEAD)"
+          NOTES="$(git log -1 --pretty=%s)"
+          bash tools/pack-content.sh "$CODE" "1.0.$CODE" "$NOTES"
+          # content.zip 与 version.json 必须位于站点根目录
+          cp dist/content.zip ./content.zip
+          cp dist/version.json ./version.json
+          cat version.json
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy . --project-name=rp-hub-mod --branch=main --commit-dirty=true
