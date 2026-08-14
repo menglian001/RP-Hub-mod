@@ -435,6 +435,11 @@ const app = createApp({
         const imageActionMenu = reactive({ show: false, image: null, prompt: '', x: 0, y: 0 });
         const imageGenAvailableModels = ref([]);
         const imageGenModelsLoading = ref(false);
+        // 生图模型选择器的分类标签，按常见生图模型系列归组
+        const imageGenModelFamilies = Object.freeze([
+            'dall-e', 'gpt-image', 'flux', 'sd', 'stable-diffusion', 'sdxl',
+            'imagen', 'gemini', 'seedream', 'kolors', 'nai', 'midjourney', 'qwen'
+        ]);
         const apiTest = reactive({ running: false, state: 'idle', message: '' });
         const imageGenTest = reactive({ running: false, state: 'idle', message: '' });
         const vertexImageSizeOptions = [
@@ -3925,6 +3930,35 @@ const app = createApp({
         };
 
         // --- Image gen model list ---
+        // 第三方生图接口的 /models 位置不统一：有的在 base 根下，有的必须带 /v1，
+        // ComfyUI 上游还可能挂在 /api 下。逐个候选地址试，任一成功即采用。
+        const buildImageGenModelEndpoints = () => {
+            const base = getImageGenBaseUrl().replace(/\/+$/, '');
+            const root = base.replace(/\/images\/generations$/, '').replace(/\/+$/, '');
+            const candidates = [];
+            if (/\/v\d+$/.test(root)) {
+                candidates.push(`${root}/models`);
+                candidates.push(`${root.replace(/\/v\d+$/, '')}/models`);
+            } else {
+                candidates.push(`${root}/v1/models`);
+                candidates.push(`${root}/models`);
+            }
+            if (isComfyImageGenMode()) candidates.push(`${root}/api/models`);
+            return [...new Set(candidates.filter(Boolean))];
+        };
+
+        // 兼容三种返回结构：OpenAI 的 { data: [{id}] }、纯数组、以及 { models: [...] }
+        const extractImageGenModelIds = (payload) => {
+            const list = Array.isArray(payload) ? payload
+                : Array.isArray(payload?.data) ? payload.data
+                    : Array.isArray(payload?.models) ? payload.models
+                        : [];
+            return [...new Set(list
+                .map(item => (typeof item === 'string' ? item : String(item?.id || item?.name || '')).trim())
+                .filter(Boolean))]
+                .sort((a, b) => a.localeCompare(b));
+        };
+
         const fetchImageGenModels = async (isManual = false) => {
             const profile = getImageGenProfile();
             if (!isPostImageGenMode()) {
@@ -3936,28 +3970,103 @@ const app = createApp({
                 return;
             }
             imageGenModelsLoading.value = true;
+            const headers = { 'Accept': 'application/json' };
+            if (profile.key) headers['Authorization'] = `Bearer ${profile.key}`;
+            const endpoints = buildImageGenModelEndpoints();
+            const failures = [];
             try {
-                const base = getImageGenBaseUrl().replace(/\/+$/, '');
-                const endpoint = /\/v\d+$/.test(base) ? `${base}/models` : `${base}/v1/models`;
-                const headers = { 'Accept': 'application/json' };
-                if (profile.key) headers['Authorization'] = `Bearer ${profile.key}`;
-                const response = await fetch(endpoint, { headers });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                const payload = await response.json();
-                const list = Array.isArray(payload?.data) ? payload.data : [];
-                imageGenAvailableModels.value = list
-                    .map(item => String(item?.id || '').trim())
-                    .filter(Boolean)
-                    .sort((a, b) => a.localeCompare(b));
-                if (isManual) {
-                    showToast(`已获取 ${imageGenAvailableModels.value.length} 个生图模型`, 'success');
+                for (const endpoint of endpoints) {
+                    try {
+                        const response = await fetch(endpoint, { headers });
+                        if (!response.ok) {
+                            const detail = await response.text().catch(() => '');
+                            const hint = response.status === 401 || response.status === 403
+                                ? '密钥无效或无权限'
+                                : response.status === 404 ? '该地址没有模型列表接口' : '';
+                            failures.push(`${endpoint} → HTTP ${response.status}${hint ? '（' + hint + '）' : ''}${detail ? ' ' + detail.slice(0, 80) : ''}`);
+                            continue;
+                        }
+                        const ids = extractImageGenModelIds(await response.json());
+                        if (!ids.length) {
+                            failures.push(`${endpoint} → 返回里没有模型`);
+                            continue;
+                        }
+                        imageGenAvailableModels.value = ids;
+                        if (isManual) showToast(`已获取 ${ids.length} 个生图模型`, 'success');
+                        return;
+                    } catch (error) {
+                        // TypeError 说明请求根本没拿到响应
+                        failures.push(`${endpoint} → ${error instanceof TypeError ? '连不通或未开跨域(CORS)' : (error.message || error)}`);
+                    }
                 }
+                throw new Error(failures.join('；'));
             } catch (error) {
-                console.error('Failed to fetch image gen models:', error);
-                if (isManual) showToast(`获取生图模型失败：${error.message || error}`, 'error');
+                console.error('[fetchImageGenModels]', endpoints, error);
+                if (isManual) {
+                    const mixedContent = window.location.protocol === 'https:'
+                        && /^http:\/\//i.test(getImageGenBaseUrl());
+                    showToast(
+                        '获取生图模型失败：' + (error.message || error)
+                        + (mixedContent ? '。当前页面是 https，而接口是 http，会被浏览器拦截，请改用 https 地址' : ''),
+                        'error'
+                    );
+                }
             } finally {
                 imageGenModelsLoading.value = false;
             }
+        };
+
+        // 生图模型选择器：复用文本模型那套弹窗（搜索 + 标签 + 列表），
+        // 只是数据源换成 imageGenAvailableModels。
+        const showImageGenModelSelector = ref(false);
+        const imageGenModelSearchQuery = ref('');
+        const imageGenModelActiveTag = ref('all');
+
+        const imageGenModelTags = computed(() => {
+            const counts = { all: imageGenAvailableModels.value.length, other: 0 };
+            const tags = new Set();
+            imageGenAvailableModels.value.forEach(id => {
+                const lower = id.toLowerCase();
+                const family = imageGenModelFamilies.find(name => lower.includes(name));
+                if (family) {
+                    tags.add(family);
+                    counts[family] = (counts[family] || 0) + 1;
+                } else {
+                    counts.other++;
+                }
+            });
+            const result = [{ name: 'all', count: counts.all }];
+            Array.from(tags).sort().forEach(name => result.push({ name, count: counts[name] }));
+            if (counts.other > 0) result.push({ name: 'other', count: counts.other });
+            return result;
+        });
+
+        const filteredImageGenModels = computed(() => {
+            let ids = imageGenAvailableModels.value;
+            const tag = imageGenModelActiveTag.value;
+            if (tag && tag !== 'all') {
+                ids = tag === 'other'
+                    ? ids.filter(id => !imageGenModelFamilies.some(name => id.toLowerCase().includes(name)))
+                    : ids.filter(id => id.toLowerCase().includes(tag));
+            }
+            const query = imageGenModelSearchQuery.value.trim().toLowerCase();
+            if (query) ids = ids.filter(id => id.toLowerCase().includes(query));
+            return ids.map(id => ({ id }));
+        });
+
+        const openImageGenModelSelector = () => {
+            if (!isPostImageGenMode()) {
+                showToast('GET 直链模式无需选择模型', 'info');
+                return;
+            }
+            showImageGenModelSelector.value = true;
+            // 列表为空时顺手拉一次，避免用户先点「刷新模型」再点选择
+            if (!imageGenAvailableModels.value.length) fetchImageGenModels(true);
+        };
+
+        const selectImageGenModel = (modelId) => {
+            setActiveImageGenModel(modelId);
+            showImageGenModelSelector.value = false;
         };
 
         // --- Connection tests ---
@@ -10733,6 +10842,8 @@ const app = createApp({
 
             // --- Mod Features Exports ---
             imageGenModeOptions, imageGenAvailableModels, imageGenModelsLoading, fetchImageGenModels,
+            showImageGenModelSelector, imageGenModelSearchQuery, imageGenModelActiveTag, imageGenModelTags,
+            filteredImageGenModels, openImageGenModelSelector, selectImageGenModel, getImageGenModel,
             apiTest, imageGenTest, testApiConnection, testImageGenConnection,
             roleImages, imageLibraryRoleUuid, imageLibraryCategory, imageLibrarySearch, imageLibraryPreview,
             imageLibraryCharacter, filteredRoleImages, openImageLibraryCharacter, closeImageLibraryCharacter,

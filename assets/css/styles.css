@@ -1652,7 +1652,7 @@
                 align-items: flex-end !important;
             }
 
-            .immersive-message-column > .group {
+            .immersive-message-column > .group:not(.message-edit-group) {
                 width: fit-content;
                 max-width: 100%;
             }

@@ -1729,21 +1729,33 @@
                                                 <label
                                                     class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 mt-3">生图模型</label>
                                                 <div class="flex items-center gap-2">
-                                                    <input
-                                                        :value="settings.imageGenMode === 'agnes' ? settings.agnesImageGenModel : settings.imageGenMode === 'vertex' ? settings.vertexImageGenModel : settings.imageGenMode === 'comfy' ? settings.comfyImageGenModel : settings.openaiImageGenModel"
-                                                        @input="settings.imageGenMode === 'agnes' ? settings.agnesImageGenModel = $event.target.value : settings.imageGenMode === 'vertex' ? settings.vertexImageGenModel = $event.target.value : settings.imageGenMode === 'comfy' ? settings.comfyImageGenModel = $event.target.value : settings.openaiImageGenModel = $event.target.value"
-                                                        type="text" list="imageGenModelList"
-                                                        class="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 text-sm focus:ring-2 focus:ring-teal-100 focus:border-teal-400 focus:outline-none transition-all shadow-sm"
-                                                        placeholder="请填写或刷新后选择模型">
-                                                    <datalist id="imageGenModelList">
-                                                        <option v-for="model in imageGenAvailableModels" :key="model" :value="model"></option>
-                                                    </datalist>
+                                                    <div class="relative flex-1 group" @click="openImageGenModelSelector">
+                                                        <div
+                                                            class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 text-sm flex items-center justify-between cursor-pointer hover:border-teal-400 hover:shadow-sm transition-all active:scale-[0.99]">
+                                                            <span class="truncate mr-2 font-mono"
+                                                                :class="getImageGenModel() ? 'text-gray-800' : 'text-gray-400'">{{ getImageGenModel() || '点击选择模型' }}</span>
+                                                            <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none"
+                                                                stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path stroke-linecap="round" stroke-linejoin="round"
+                                                                    stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                                            </svg>
+                                                        </div>
+                                                    </div>
                                                     <button @click="fetchImageGenModels(true)" type="button"
                                                         :disabled="imageGenModelsLoading"
                                                         class="px-3 py-1.5 rounded-lg bg-teal-50 border border-teal-200 text-teal-700 text-xs font-bold hover:bg-teal-100 disabled:opacity-50 whitespace-nowrap">
                                                         {{ imageGenModelsLoading ? '刷新中...' : '刷新模型' }}
                                                     </button>
                                                 </div>
+                                                <input
+                                                    :value="settings.imageGenMode === 'agnes' ? settings.agnesImageGenModel : settings.imageGenMode === 'vertex' ? settings.vertexImageGenModel : settings.imageGenMode === 'comfy' ? settings.comfyImageGenModel : settings.openaiImageGenModel"
+                                                    @input="settings.imageGenMode === 'agnes' ? settings.agnesImageGenModel = $event.target.value : settings.imageGenMode === 'vertex' ? settings.vertexImageGenModel = $event.target.value : settings.imageGenMode === 'comfy' ? settings.comfyImageGenModel = $event.target.value : settings.openaiImageGenModel = $event.target.value"
+                                                    type="text" list="imageGenModelList"
+                                                    class="w-full mt-2 bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-500 text-xs font-mono focus:ring-2 focus:ring-teal-100 focus:border-teal-400 focus:outline-none transition-all shadow-sm"
+                                                    placeholder="或手动填写模型名（接口未提供列表时用）">
+                                                <datalist id="imageGenModelList">
+                                                    <option v-for="model in imageGenAvailableModels" :key="model" :value="model"></option>
+                                                </datalist>
 
                                                 <template v-if="settings.imageGenMode === 'vertex'">
                                                     <label
@@ -2922,6 +2934,15 @@
             @close="showModelSelector = false" @select="selectModel" @select-slots="selectQuickModels"
             @update:search-query="modelSearchQuery = $event"
             @update:active-tag="activeModelTag = $event"></model-selector-modal>
+
+        <!-- 生图模型选择器：与文本模型共用组件，数据源为生图接口返回的列表 -->
+        <model-selector-modal :show="showImageGenModelSelector" target="imageGenModel"
+            :search-query="imageGenModelSearchQuery" :active-tag="imageGenModelActiveTag"
+            :tags="imageGenModelTags" :models="filteredImageGenModels"
+            :current-model="getImageGenModel()"
+            @close="showImageGenModelSelector = false" @select="selectImageGenModel"
+            @update:search-query="imageGenModelSearchQuery = $event"
+            @update:active-tag="imageGenModelActiveTag = $event"></model-selector-modal>
 
         <add-character-modal :show="showAddCharacterMenu" @close="showAddCharacterMenu = false"
             @create="createNewCharacter(); showAddCharacterMenu = false"

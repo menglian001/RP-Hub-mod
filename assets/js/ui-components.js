@@ -830,7 +830,7 @@
                 <modal-shell v-if="show" overlay-class="z-50 bg-black/50 backdrop-blur-sm p-4"
                     panel-class="bg-white rounded-xl border border-gray-200 w-full max-w-2xl max-h-[90vh] h-[90vh] flex flex-col shadow-2xl transform transition-all scale-100">
                         <div class="p-4 border-b border-gray-100 flex justify-between items-center">
-                            <h3 class="text-lg font-bold text-gray-800">{{ target === 'quickModels' ? '聊天模型' : '选择模型' }}</h3>
+                            <h3 class="text-lg font-bold text-gray-800">{{ target === 'quickModels' ? '聊天模型' : (target === 'imageGenModel' ? '选择生图模型' : '选择模型') }}</h3>
                             <button @click="$emit('close')" class="text-gray-400 hover:text-gray-600 focus:outline-none transition-colors">
                                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
