@@ -93,7 +93,7 @@
 
         var copy = document.createElement('button');
         copy.textContent = '复制';
-        copy.style.cssText = 'position:absolute;right:80px;top:8px;background:#06c;color:#fff;'
+        copy.style.cssText = 'position:absolute;right:160px;top:8px;background:#06c;color:#fff;'
             + 'border:0;padding:6px 10px;border-radius:4px;font:12px monospace;';
         copy.onclick = function () {
             try {
@@ -107,6 +107,24 @@
             } catch (e) { copy.textContent = '复制失败'; }
         };
         box.appendChild(copy);
+
+        var update = document.createElement('button');
+        update.textContent = '强制检查更新';
+        update.style.cssText = 'position:absolute;right:8px;top:40px;background:#f80;color:#000;'
+            + 'border:0;padding:6px 10px;border-radius:4px;font:12px monospace;font-weight:bold;';
+        update.onclick = function () {
+            if (window.RPHubNative && typeof window.RPHubNative.checkUpdate === 'function') {
+                try {
+                    window.RPHubNative.checkUpdate();
+                    update.textContent = '已触发';
+                } catch (e) {
+                    update.textContent = 'ERR: ' + e.message;
+                }
+            } else {
+                update.textContent = '无 checkUpdate 方法';
+            }
+        };
+        box.appendChild(update);
 
         document.body.appendChild(box);
         console.log('[HOTFIX-DIAG]\n' + text);
