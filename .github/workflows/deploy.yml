@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'android/**'
+      - '.github/workflows/build-apk.yml'
   workflow_dispatch:
 
 jobs:

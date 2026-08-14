@@ -33,7 +33,7 @@ zip -q -r -9 "$ZIP" \
   assets \
   character \
   novel \
-  -x "*.DS_Store" -x "__MACOSX/*" -x "presence-server/*"
+  -x "*.DS_Store" -x "__MACOSX/*" -x "presence-server/*" -x "android/*"
 
 SHA="$(sha256sum "$ZIP" | cut -d' ' -f1)"
 SIZE="$(stat -c%s "$ZIP")"

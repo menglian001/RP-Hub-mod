@@ -1,0 +1,20 @@
+# 签名密钥与密码，绝不入库
+*.keystore
+*.jks
+keystore.properties
+local.properties
+
+# 构建产物
+build/
+.gradle/
+app/build/
+*.apk
+*.aab
+
+# 内置网页内容由 sync-web.sh 从仓库根目录同步生成，不重复入库
+app/src/main/assets/web/
+
+# IDE
+.idea/
+*.iml
+.DS_Store

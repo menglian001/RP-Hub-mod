@@ -1,0 +1,78 @@
+name: Build signed APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - '.github/workflows/build-apk.yml'
+    tags: ['app-v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # sync-web.sh 用提交总数作为内置内容版本号
+          fetch-depth: 0
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: 补全前端依赖
+        run: |
+          if [ ! -f assets/vendor/vue.global.prod.js ]; then
+            bash tools/fetch-vendor.sh
+          else
+            echo "vendor 已存在，跳过下载"
+          fi
+
+      - name: 同步内置网页内容
+        run: bash android/sync-web.sh
+
+      - name: 恢复签名密钥
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RPHUB_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64"
+          echo "$KEYSTORE_BASE64" | base64 --decode > android/rphub.keystore
+
+      - name: 构建签名 APK
+        working-directory: android
+        env:
+          RPHUB_STORE_FILE: rphub.keystore
+          RPHUB_STORE_PASSWORD: ${{ secrets.RPHUB_STORE_PASSWORD }}
+          RPHUB_KEY_ALIAS: ${{ secrets.RPHUB_KEY_ALIAS }}
+          RPHUB_KEY_PASSWORD: ${{ secrets.RPHUB_KEY_PASSWORD }}
+        run: gradle :app:assembleRelease --no-daemon
+
+      - name: 校验签名
+        run: |
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs \
+            android/app/build/outputs/apk/release/app-release.apk
+
+      - name: 清理密钥
+        if: always()
+        run: rm -f android/rphub.keystore
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RP-Hub-${{ github.sha }}
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
