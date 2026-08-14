@@ -32,7 +32,8 @@ zip -q -r -9 "$ZIP" \
   index.html \
   assets \
   character \
-  -x "*.DS_Store" -x "__MACOSX/*"
+  novel \
+  -x "*.DS_Store" -x "__MACOSX/*" -x "presence-server/*"
 
 SHA="$(sha256sum "$ZIP" | cut -d' ' -f1)"
 SIZE="$(stat -c%s "$ZIP")"
