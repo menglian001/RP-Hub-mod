@@ -158,19 +158,42 @@
 ## 6. APK 签名、覆盖更新与密钥
 
 覆盖更新要求：**包名不变、签名证书不变、versionCode 递增。**
-完整规则见 [OVERRIDE-UPDATE.md](OVERRIDE-UPDATE.md)。
+完整规则、发版流程与密钥交接方式见 [OVERRIDE-UPDATE.md](OVERRIDE-UPDATE.md)。
+
+### 当前固定证书
+
+```
+Alias            : rphub
+DN               : CN=RP Hub, OU=Mod, O=RPHub, L=NA, ST=NA, C=CN
+证书 SHA-256     : 274017a6cc450d8e2a068a409a61e23e9477a0cdb3a004e953945b340a606725
+证书 SHA-1       : 29e3588a92913a72133ec1154ca65c0110c48ba4
+有效期           : 2026-08-14 ~ 2056-08-06
+密钥算法         : RSA 2048
+keystore SHA-256 : 7df2f5176ca6ece5c942cde49e68a48b0de9c35ba10741e45847e8f4801ea1e1
+```
+
+指纹是公开信息，可以放进文档——它只能用来**验证**，不能用来签名。
+私钥文件 `rphub.keystore` 与两个密码绝不入库，只通过私密渠道交接。
+从备份恢复 keystore 后用上面的 keystore SHA-256 校验是否为同一文件。
 
 ### 强制规则
 
 - `applicationId` 永远保持 `cc.salarycat.rphub`；
-- 每次正式 APK 必须递增 `versionCode`；
+- 每次正式 APK 必须递增 `versionCode`（已发布的最大值为 `2`）；
 - 必须一直使用同一份 `rphub.keystore`；
 - 构建完成必须用 `apksigner verify --print-certs` 检查证书 SHA-256；
 - 不得把 `*.keystore`、`*.jks`、`keystore.properties`、密码或 Access Token 提交进 Git；
-- keystore 必须离线备份至少两份；
-- GitHub Actions 只从 Secrets 临时恢复 keystore，构建后不上传密钥。
+- keystore 必须离线备份至少两份，密码存在密码管理器里；
+- GitHub Actions 只从 Secrets 临时恢复 keystore，构建后以 `if: always()` 删除，不上传密钥。
 
-当前 APK 使用 v2 + v3 签名。v3 为将来密钥轮换保留能力，但不能代替妥善备份私钥。
+当前 APK 实测为 v2 + v3 签名（v1 因 `minSdk = 24` 被 AGP 自动跳过，不影响覆盖安装）。
+v3 为将来密钥轮换保留能力，但不能代替妥善备份私钥。
+
+### 交接给他人构建时
+
+需要私密传递两样：`rphub.keystore` 文件、storePassword 与 keyPassword。
+接手方拿到后即具备签发可覆盖安装包的能力——等同于对已安装用户的完全控制权，
+因为覆盖安装会继承 App 的全部本地数据与权限。只交给可信任的人。
 
 ---
 
@@ -216,10 +239,11 @@
 
 ### APK
 
-- [ ] `applicationId` 未变；
-- [ ] `versionCode` 已递增；
-- [ ] 使用固定证书签名，证书指纹正确；
+- [ ] `applicationId` 未变（`cc.salarycat.rphub`）；
+- [ ] `versionCode` 已递增（大于已发布的 `2`）；
+- [ ] 使用固定证书签名，`apksigner verify --print-certs` 输出 `274017a6...`；
 - [ ] `apksigner verify -v` 的 v2、v3 为 true；
+- [ ] 构建目录内无残留的 `rphub.keystore` / `keystore.properties` 被误提交；
 - [ ] Release 构建未开启 WebView 调试；
 - [ ] Manifest 权限没有新增且每项都有用途说明；
 - [ ] 在至少一台 Android 7+ 设备验证安装、升级覆盖、文件导入导出和外链跳转。

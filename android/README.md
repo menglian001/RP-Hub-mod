@@ -3,11 +3,25 @@
 把 [RP-Hub](https://github.com/STA1N156/RP-Hub) 网页版打包成 Android 应用，
 内置完整网页内容，支持从远端热更新。
 
+当前已发布：**2.0.0**（versionCode 2，内置内容 v43）
+→ [Releases](https://github.com/menglian001/RP-Hub-mod/releases/tag/v2.0.0)
+
 ## 快速开始
 
 **发新版本之前，先读 [OVERRIDE-UPDATE.md](OVERRIDE-UPDATE.md)。**
-那份文档记录了覆盖安装所需的签名信息和版本号规则，
-搞错任何一条都会导致用户装不上，只能卸载重装。
+那份文档记录了覆盖安装所需的签名证书指纹、密钥保管与交接方式、
+版本号规则和完整发版流程，搞错任何一条都会导致用户装不上，
+只能卸载重装（本地聊天记录与 API Key 全部丢失）。
+
+三条硬约束，摘录在此，细节见那份文档：
+
+| 项 | 值 |
+|---|---|
+| 包名 | `cc.salarycat.rphub`（不要改） |
+| 签名证书 SHA-256 | `274017a6cc450d8e2a068a409a61e23e9477a0cdb3a004e953945b340a606725` |
+| versionCode | 必须大于已发布的 `2` |
+
+签名私钥 `rphub.keystore` **不在仓库里**，需向持有人索取。
 
 **改壳代码、改热更新、加原生接口之前，先读 [SECURITY-PRIVACY.md](SECURITY-PRIVACY.md)。**
 里面写了权限用途、WebView 限制、数据存放位置、第三方 API 外发行为，
@@ -96,10 +110,10 @@ assets/web/         APK 内置内容
 ```json
 {
   "shellVersion": "2.0.0",
-  "bundledVersion": 42,
+  "bundledVersion": 43,
   "activeVersion": 0,
   "stagingVersion": 0,
-  "effectiveVersion": 42,
+  "effectiveVersion": 43,
   "hasActiveContent": false,
   "source": "bundled"
 }
@@ -110,7 +124,7 @@ assets/web/         APK 内置内容
 `gradle.properties`：
 
 ```properties
-bundledContentVersion=42    # 必须与 assets/web/version.json 的 versionCode 一致
+bundledContentVersion=43    # 必须与 assets/web/version.json 的 versionCode 一致
 ```
 
 `app/build.gradle.kts`：
@@ -120,6 +134,15 @@ applicationId = "cc.salarycat.rphub"    // 不要改，改了就无法覆盖安�
 versionCode = 2                          // 每次发版递增
 buildConfigField("String", "UPDATE_BASE_URL", "\"https://rp-hub-mod.pages.dev/\"")
 ```
+
+## 两条更新通道
+
+| 通道 | 更新什么 | 怎么触发 |
+|---|---|---|
+| 热更新 | 网页内容（`index.html`、`assets/`、`character/`、`novel/`） | 推送到 `main`，Cloudflare Pages 自动部署，App 启动时自动拉取 |
+| APK 覆盖安装 | 壳本体（Kotlin 代码、权限、图标） | 手动构建签名 APK 并分发 |
+
+改网页内容推 CF 就够了，用户不用装新包。只有改壳才需要发 APK。
 
 ## 许可
 
