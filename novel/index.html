@@ -2391,8 +2391,13 @@
                             availableModels.value = data.data.sort((a, b) => a.id.localeCompare(b.id));
                         }
                     } catch (e) {
-                        console.error(e);
-                        showToast('获取模型列表失败', 'error');
+                        console.error('[fetchModels]', e);
+                        // TypeError 表示请求没拿到响应：地址不通、未开 CORS，
+                        // 或页面是 https 而 API 是 http（混合内容被拦）。
+                        const msg = e instanceof TypeError
+                            ? '无法连接 API，请检查地址是否可访问、是否为 https、服务端是否允许跨域'
+                            : e.message;
+                        showToast('获取模型列表失败: ' + msg, 'error');
                     } finally {
                         isLoadingModels.value = false;
                     }

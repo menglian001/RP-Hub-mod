@@ -2201,6 +2201,25 @@ const app = createApp({
             return payload;
         };
 
+        // 卡片模式生成完成后写入图片管理。提示词优先取请求 URL 的 tag 参数——
+        // 重新生成会改写 tag，它比卡片上的初始 data-imagegen-prompt 更准。
+        const rememberGeneratedCardImage = (card, imageUrl) => {
+            const roleUuid = currentCharacter.value?.uuid || '';
+            if (!roleUuid || !imageUrl || !card) return;
+            if (card.dataset.imageRemembered === imageUrl) return;
+            let prompt = '';
+            try {
+                prompt = new URL(card.dataset.imageRequest || '', window.location.href)
+                    .searchParams.get('tag') || '';
+            } catch { prompt = ''; }
+            prompt = String(prompt || card.dataset.imagegenPrompt || '').trim();
+            if (!prompt) return;
+            card.dataset.imageRemembered = imageUrl;
+            addRoleImage(roleUuid, { src: imageUrl, prompt, category: 'chat', source: 'generated' })
+                .catch(error => console.warn('保存聊天图片失败:', error));
+        };
+
+
         const renderGeneratedImageJob = (card, task, job) => {
             if (!card?.isConnected) return task.cards.delete(card);
             task.job = job;
@@ -2237,8 +2256,12 @@ const app = createApp({
             const image = card.querySelector('img');
             image.style.height = '100%';
             image.src = imageUrl;
+            image.alt = '生成图片';
             card.classList.remove('is-generating', 'is-generation-error', 'is-waiting');
             card.dataset.imageJobState = job.status;
+            // 卡片模式下提示词存在卡片上，完成后补记进图片管理，
+            // 与占位图模式（hydrateImageGenPlaceholder）保持一致。
+            if (job.status === 'done') rememberGeneratedCardImage(card, imageUrl);
         };
 
         const startGeneratedImageTask = (requestUrl, fresh = false) => {
@@ -3641,23 +3664,43 @@ const app = createApp({
 
         const fetchModels = async (isManual = false) => {
             const apiKey = String(settings.apiKey || '').trim();
+            const apiUrl = String(settings.apiUrl || '').trim();
+            if (!apiUrl) {
+                if (isManual) showToast('请先填写 API 地址', 'info');
+                return;
+            }
             if (!apiKey) {
                 if (isManual) showToast('请先填写当前 API 预设的 Key', 'info');
                 return;
             }
+            const url = getApiEndpoint('models');
             try {
                 if (isManual) showToast('正在获取模型列表...', 'info');
-                const url = getApiEndpoint('models');
                 const response = await fetch(url, {
                     headers: { 'Authorization': `Bearer ${apiKey}` }
                 });
-                if (!response.ok) throw new Error('Failed to fetch models');
+                if (!response.ok) {
+                    // 带上状态码，401/403 是 Key 问题，404 多为地址填错，5xx 是服务端故障
+                    const detail = await response.text().catch(() => '');
+                    const hint = response.status === 401 || response.status === 403
+                        ? 'API Key 无效或无权限'
+                        : response.status === 404
+                            ? 'API 地址不对，检查是否该带 /v1'
+                            : '';
+                    throw new Error(`HTTP ${response.status}${hint ? ' · ' + hint : ''}${detail ? ' · ' + detail.slice(0, 120) : ''}`);
+                }
                 const data = await response.json();
                 availableModels.value = data.data || [];
                 if (isManual) showToast(`成功获取 ${availableModels.value.length} 个模型`, 'success');
             } catch (error) {
-                console.error(error);
-                showToast('获取模型失败: ' + error.message, 'error');
+                console.error('[fetchModels]', url, error);
+                // fetch 抛 TypeError 表示请求没拿到响应：地址不通、服务端没开 CORS、
+                // 或用了 http 而页面是 https（App 内是 https://localhost，混合内容会被拦）。
+                const isNetworkError = error instanceof TypeError;
+                const message = isNetworkError
+                    ? `无法连接 ${new URL(url, window.location.href).origin}，请检查 API 地址是否可访问、是否为 https、服务端是否允许跨域`
+                    : error.message;
+                showToast('获取模型失败: ' + message, 'error');
             }
         };
 
@@ -9093,10 +9136,18 @@ const app = createApp({
             const imgStyle = 'max-width: 100%; height: auto; width: auto; display: block; object-fit: contain; border-radius: 9px; transition: transform 0.3s ease;';
             // OpenAI 兼容模式无法用 <img src> 直接取图，先渲染占位图，
             // 再由 MutationObserver 读取 data-imagegen-prompt 发起 POST 并回填。
-            // GET 直链模式也加上 data-imagegen-prompt，让图片管理能记录。
+            //
+            // GET 直链（默认 NAI 服务）模式改回上游的卡片结构：卡片自带进度条和
+            // 「重新生成图片」按钮，由 loadGeneratedImageCard 走 /api/jobs 轮询，
+            // 点击按钮触发 handleGeneratedImageReroll。之前这里只渲染一个裸 <img>，
+            // 导致 .generated-image-card 从不出现，重新生图按钮无处可点。
+            const cardStyle = 'width:100%;height:auto;max-width:100%;box-sizing:border-box;padding:2px;border:1px solid rgba(255,255,255,.58);background:transparent;position:relative;border-radius:12px;overflow:hidden;display:flex;justify-content:center;align-items:center;box-shadow:0 4px 14px rgba(148,163,184,.06)';
+            const cardImgStyle = 'max-width:100%;height:100%;width:100%;display:block;object-fit:contain;border-radius:9px;transition:transform .3s ease';
+            const rerollButton = '<button type="button" class="generated-image-reroll" title="重新生成图片" aria-label="重新生成图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg></button>';
+            const progressBlock = '<div class="generated-image-progress" aria-live="polite"><svg class="generated-image-spinner" viewBox="0 0 50 50" aria-hidden="true"><circle class="generated-image-spinner-path" cx="25" cy="25" r="20" fill="none" stroke-width="2"></circle></svg><span class="generated-image-progress-label">等待生成</span><span class="generated-image-progress-track"><i class="generated-image-progress-bar"></i></span></div>';
             const imageGenReplacement = isOpenAIImageGen()
                 ? '<div style="' + wrapperStyle + '"><img src="' + IMAGE_GEN_PLACEHOLDER_SRC + '" data-imagegen-prompt="$1" alt="生成图片(生成中)" style="' + imgStyle + '"></div>'
-                : '<div style="' + wrapperStyle + '"><img src="' + imageGenSrc + '" data-imagegen-prompt="$1" alt="生成图片" style="' + imgStyle + '"></div>';
+                : '<div class="generated-image-card is-generating" data-image-request="' + imageGenSrc + '" data-imagegen-prompt="$1" style="' + cardStyle + '"><img alt="" style="' + cardImgStyle + '">' + progressBlock + rerollButton + '</div>';
             const imageGenRegexContent = {
                 name: imageGenRegexName,
                 regex: '/image###([\\s\\S]*?)###/g',
