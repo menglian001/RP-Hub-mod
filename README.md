@@ -76,6 +76,45 @@ Roleplay-Hub/
 
 ---
 
+## Android 套壳应用 (Android App)
+
+本仓库同时维护一个 Android 套壳版，内置完整网页内容并支持热更新。
+
+当前已发布：**2.1.0**（versionCode 3，内置内容 v48）
+→ [Releases](https://github.com/menglian001/RP-Hub-mod/releases/tag/v2.1.0)
+
+发版前必读的三条硬约束，任意一条不满足用户就装不上、只能卸载重装（本地数据全丢）：
+
+| 项 | 值 |
+|---|---|
+| 包名 / applicationId | `cc.salarycat.rphub`（永远不要改） |
+| 签名证书 SHA-256 | `274017a6cc450d8e2a068a409a61e23e9477a0cdb3a004e953945b340a606725` |
+| key alias | `rphub` |
+| versionCode | 必须大于已发布的 `3` |
+
+签名私钥 `rphub.keystore` 与其密码**不在仓库里**，需向持有人索取。
+GitHub Actions 已配好签名 Secret，推 `android/**` 或手动 dispatch 即可拿到签名包。
+
+打包环境（实测通过的组合）：JDK 17 + Gradle 8.7 + AGP 8.4.0 + Kotlin 1.9.23，
+compileSdk/targetSdk 34、minSdk 24、build-tools 34.0.0。工程不带 wrapper。
+
+两条更新通道互相独立：
+
+| 通道 | 更新什么 | 怎么触发 |
+|---|---|---|
+| 热更新 | 网页内容（`index.html`、`assets/`、`character/`、`novel/`） | 推送到 `main` → Cloudflare Pages 自动部署 → App 启动时自动拉取 |
+| APK 覆盖安装 | 壳本体（Kotlin 代码、权限、图标、全屏与返回键行为） | 构建签名 APK 并分发 |
+
+改网页内容推一下就行，用户不用装新包；只有改壳才需要发 APK。
+
+详细文档：
+
+- [`android/OVERRIDE-UPDATE.md`](./android/OVERRIDE-UPDATE.md) — 签名证书、密钥保管与交接、打包环境、完整发版流程、常见问题
+- [`android/README.md`](./android/README.md) — 工程结构、热更新机制、`window.RPHubNative` 接口、返回键与全屏行为
+- [`android/SECURITY-PRIVACY.md`](./android/SECURITY-PRIVACY.md) — 权限用途、数据存放、外发行为与已知限制
+
+---
+
 ## 协议与许可 (License)
 
 本项目严格遵守以下开源协议：

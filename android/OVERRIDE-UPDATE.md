@@ -3,7 +3,8 @@
 本文件记录让新版本 APK 能**直接覆盖安装**所需的全部信息。
 换电脑、换构建环境、换人接手、隔很久再来更新，照这份文档做就不会踩坑。
 
-> 最后核对时间：2026-08-15。文中所有指纹、版本号、URL 均为实测值。
+> 最后核对时间：2026-08-15，对应已发布版本 **2.1.0（versionCode 3，内置内容 v48）**。
+> 文中所有指纹、版本号、路径、URL 均为实测值，不是抄来的模板。
 
 ---
 
@@ -14,9 +15,23 @@
 1. **包名** `cc.salarycat.rphub` —— 不要改。
 2. **签名证书** SHA-256 = `274017a6cc450d8e2a068a409a61e23e9477a0cdb3a004e953945b340a606725`
    —— 必须用同一个 `rphub.keystore`，这个文件**不在仓库里**，需要向持有人索取。
-3. **versionCode** 比 `2` 大 —— 改 `android/app/build.gradle.kts`。
+3. **versionCode** 比 `3` 大 —— 改 `android/app/build.gradle.kts`。
 
 其余步骤见第六节。没有 keystore 就做不出可覆盖的包，这是硬约束，没有绕过办法。
+
+### 一句话速查表
+
+| 项 | 值 | 定义在哪 |
+|---|---|---|
+| 包名 / applicationId | `cc.salarycat.rphub` | `app/build.gradle.kts` |
+| namespace | `cc.salarycat.rphub` | `app/build.gradle.kts` |
+| keystore 文件 | `android/rphub.keystore`（不入库） | 向持有人索取 |
+| key alias | `rphub` | keystore 内 |
+| 证书 SHA-256 | `274017a6cc450d8e2a068a409a61e23e9477a0cdb3a004e953945b340a606725` | keystore 内 |
+| 已发布 versionCode | `3`（versionName `2.1.0`） | `app/build.gradle.kts` |
+| 已发布内置内容版本 | `48` | `gradle.properties` + `assets/web/version.json` |
+| 热更新基址 | `https://rp-hub-mod.pages.dev/` | `app/build.gradle.kts` 的 `UPDATE_BASE_URL` |
+| minSdk / targetSdk / compileSdk | 24 / 34 / 34 | `app/build.gradle.kts` |
 
 ---
 
@@ -28,20 +43,20 @@ Android 允许新 APK 覆盖旧 APK，必须**同时**满足：
 |---|---|---|---|
 | 包名相同 | `cc.salarycat.rphub` | `app/build.gradle.kts` 的 `applicationId` 与 `namespace` | **永远不要改** |
 | 签名证书相同 | SHA-256 `274017a6...` | `rphub.keystore` | 必须是同一个 keystore 里的同一个 alias |
-| versionCode 不降低 | 当前 `2` | `app/build.gradle.kts` 的 `versionCode` | 每次发版必须递增 |
+| versionCode 不降低 | 当前 `3` | `app/build.gradle.kts` 的 `versionCode` | 每次发版必须递增 |
 
 任意一条不满足，安装时会报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`，
 手机上表现为「应用未安装」，用户只能卸载重装（丢失全部本地数据：
 聊天记录、角色卡、API Key 全没）。
 
-注意 `versionName`（如 `2.0.0`）只是展示用，系统不看它。
+注意 `versionName`（如 `2.1.0`）只是展示用，系统不看它。
 真正决定能否覆盖的是 `versionCode` 这个整数。
 
 ---
 
 ## 二、本项目的签名证书
 
-从 2.0.0 版本起固定使用这一份证书，实测数据：
+从 2.0.0 版本起固定使用这一份证书，2.1.0 实测仍为同一份：
 
 ```
 Alias           : rphub
@@ -74,12 +89,17 @@ apksigner verify --print-certs your.apk | grep "SHA-256 digest"
 keytool -printcert -jarfile your.apk | grep -A1 SHA256
 ```
 
-### 已发布的 2.0.0 实测签名状态
+### 已发布版本的实测签名状态
+
+2.0.0 与 2.1.0 两版输出完全一致：
 
 ```
-Verified using v1 scheme (JAR signing):              false
-Verified using v2 scheme (APK Signature Scheme v2):  true
-Verified using v3 scheme (APK Signature Scheme v3):  true
+Verifies
+Verified using v1 scheme (JAR signing):                 false
+Verified using v2 scheme (APK Signature Scheme v2):     true
+Verified using v3 scheme (APK Signature Scheme v3):     true
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4):     false
 Number of signers: 1
 ```
 
@@ -133,10 +153,16 @@ v3 已启用，意味着日后万一必须更换密钥，可以走
 
 ---
 
-## 四、GitHub Actions 自动构建
+## 四、GitHub Actions 自动构建（推荐路径）
 
-工作流在 `.github/workflows/build-apk.yml`，
-推送到 `main` 且改动了 `android/**` 时、或手动 dispatch 时构建签名 APK。
+工作流在 `.github/workflows/build-apk.yml`。触发条件：
+
+- 推送到 `main` 且改动了 `android/**` 或该工作流文件本身
+- 推送 `app-v*` 标签
+- 在 Actions 页面手动 `workflow_dispatch`
+
+**只改网页内容不会触发**，这是有意的——网页走热更新，不需要新 APK。
+改了壳但没触发时，去 Actions 页手动 dispatch 一次即可。
 
 ### 需要配置的 4 个 Secret
 
@@ -157,9 +183,23 @@ base64 -w 0 android/rphub.keystore
 
 把输出的一整行粘贴为 `RPHUB_KEYSTORE_BASE64` 的值（约 3592 字符）。
 
-工作流会把密钥解码到 `android/rphub.keystore`，构建后
-以 `if: always()` 无条件删除，失败也不会残留。
-构建产物在 Actions 页面的 Artifacts 里下载，保留 30 天。
+### 工作流做了什么
+
+按顺序：checkout（`fetch-depth: 0`，因为内容版本号取提交总数）→ 装 JDK 17 与
+Gradle 8.7 → 缺 `assets/vendor` 时跑 `tools/fetch-vendor.sh` → 跑
+`android/sync-web.sh` 同步内置网页内容 → 从 Secret 解出 keystore →
+`gradle :app:assembleRelease` → `apksigner verify --print-certs` 打印指纹 →
+`if: always()` 删除 keystore（失败也不残留）→ 上传 Artifact
+`RP-Hub-<commit sha>`，保留 30 天。
+
+也就是说 CI 已经把「同步内容 + 签名 + 验签」全包了，
+本地不配 keystore 也能拿到可覆盖安装的正式包。
+
+### 从 CI 产物取 APK
+
+Actions → 对应 run → Artifacts 下载 zip，解压得到 `app-release.apk`。
+落地后建议自己再核一遍指纹与版本号（第六节第 4 步的命令），
+然后改名成 `RP-Hub-<versionName>-v<内容版本>.apk` 上传到 Release。
 
 > 这 4 个 Secret 未配置时该工作流会失败（`test -n "$KEYSTORE_BASE64"` 直接退出），
 > 不影响 Cloudflare Pages 的内容部署工作流。
@@ -168,11 +208,28 @@ base64 -w 0 android/rphub.keystore
 
 ## 五、本地构建
 
-### 环境要求
+### 环境要求（本仓库实测通过的组合）
 
-- JDK 17
-- Android SDK（platform-android-34、build-tools 34.0.0）
-- Gradle 8.7
+| 组件 | 版本 | 说明 |
+|---|---|---|
+| JDK | 17（实测 `17.0.20`，Temurin / OpenJDK 均可） | AGP 8.x 硬要求，用 21 会报 Unsupported class file |
+| Gradle | 8.7 | 工程**没有** `gradle/wrapper`，必须用系统装的 gradle |
+| Android Gradle Plugin | 8.4.0 | 根 `build.gradle.kts` 的 plugins 块 |
+| Kotlin | 1.9.23 | 根 `build.gradle.kts`，与 AGP 8.4 匹配，别单独升 |
+| compileSdk / targetSdk | 34（`platforms/android-34`） | |
+| minSdk | 24（Android 7.0） | 决定了 v1 签名被跳过，见第二节 |
+| build-tools | 34.0.0 | `apksigner`、`aapt2` 都从这里取 |
+
+没有 wrapper 是有意的：`gradle -v` 必须自己是 8.7。版本不对时最典型的报错是
+`Unsupported class file major version` 或 AGP 与 Gradle 不兼容。
+
+需要的 SDK 组件，用 `sdkmanager` 装：
+
+```bash
+sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+```
+
+Maven 仓库已在 `settings.gradle.kts` 配了阿里云镜像，国内网络直接能拉。
 
 ### 签名配置
 
@@ -196,6 +253,9 @@ export RPHUB_KEY_ALIAS=rphub
 export RPHUB_KEY_PASSWORD=...
 ```
 
+两处都没配时 `signingConfig` 为空，产出的是**未签名包，装不上**，
+构建本身不会报错，很容易漏掉——构建完务必按第六节第 4 步验签。
+
 ### 构建命令
 
 ```bash
@@ -206,6 +266,13 @@ gradle :app:assembleRelease --no-daemon
 ```
 
 产物：`android/app/build/outputs/apk/release/app-release.apk`
+
+只想快速验证代码能编译、不出包时（比改了 Kotlin 或主题资源）：
+
+```bash
+gradle --offline -q compileReleaseKotlin      # 只编 Kotlin
+gradle --offline -q processReleaseResources   # 只编资源（themes/colors 等）
+```
 
 注意 `debug` 构建类型也用了 release 签名配置，
 这样调试包和正式包能互相覆盖，方便本地验证。
@@ -232,7 +299,7 @@ bash sync-web.sh
 
 ```properties
 # gradle.properties，当前值
-bundledContentVersion=43
+bundledContentVersion=48
 ```
 
 不一致会导致壳误判内置内容比线上新或旧，热更新逻辑出错。
@@ -243,8 +310,8 @@ bundledContentVersion=43
 `app/build.gradle.kts`：
 
 ```kotlin
-versionCode = 3          // 必须比上一版大，当前已发布的是 2
-versionName = "2.0.1"    // 展示用，随意
+versionCode = 4          // 必须比上一版大，当前已发布的是 3
+versionName = "2.1.1"    // 展示用，随意
 ```
 
 **versionCode 忘记递增，覆盖安装会失败。**
@@ -255,28 +322,50 @@ versionName = "2.0.1"    // 展示用，随意
 gradle :app:assembleRelease --no-daemon
 
 APK=app/build/outputs/apk/release/app-release.apk
+BT=$ANDROID_HOME/build-tools/34.0.0
 
-# 签名指纹必须是 274017a6...
-apksigner verify --print-certs "$APK" | grep "SHA-256 digest"
+# 签名指纹必须是 274017a6...，不对就装不上
+"$BT/apksigner" verify --print-certs "$APK" | grep "SHA-256 digest"
 
-# 关键内容都在
+# 包名 / versionCode / versionName 一次看全
+"$BT/aapt2" dump badging "$APK" | head -1
+# → package: name='cc.salarycat.rphub' versionCode='3' versionName='2.1.0' ...
+
+# 内置网页内容与版本号
 unzip -l "$APK" | grep "assets/web/novel/index.html"
-
-# 版本号确认
-aapt2 dump badging "$APK" | head -1
+unzip -p "$APK" assets/web/version.json | head -3
 ```
+
+这四项全对才发出去。**最容易漏的是验签**——没配 keystore 时构建照样成功，
+出来的是未签名包，用户点安装才发现装不上。
 
 ### 5. 发布到 GitHub Releases
 
+有 `gh` 时：
+
 ```bash
-gh release create v2.0.1 \
-  --title "RP Hub 2.0.1" \
+gh release create v2.1.1 \
+  --title "RP Hub 2.1.1（内容 v49）" \
   --notes "更新说明" \
+  --target "$(git rev-parse HEAD)" \
   app/build/outputs/apk/release/app-release.apk
 ```
 
-当前已发布：
-<https://github.com/menglian001/RP-Hub-mod/releases/tag/v2.0.0>
+产物文件名建议按 `RP-Hub-<versionName>-v<内容版本>.apk` 命名，
+和历史发布保持一致，一眼能看出壳版本与内容版本的对应关系。
+
+也可以直接用 CI 产物：Actions → 对应 run → Artifacts 下载 zip，
+里面就是签名好的 `app-release.apk`，改名后上传到 Release 即可，
+不需要在本地重新构建（省掉配 keystore 这一步）。
+
+已发布记录：
+
+- 2.1.0 <https://github.com/menglian001/RP-Hub-mod/releases/tag/v2.1.0>
+- 2.0.0 <https://github.com/menglian001/RP-Hub-mod/releases/tag/v2.0.0>
+
+> 仓库当前是 **Private**，Release 附件的 `browser_download_url`
+> 匿名访问会返回 404，必须登录有权限的账号才能下载。
+> 匿名分发需要先把仓库改为 Public，或另找渠道传 APK。
 
 ### 6. 分发
 
@@ -286,11 +375,15 @@ gh release create v2.0.1 \
 
 ## 七、版本历史与签名对应关系
 
-| App 版本 | versionCode | 内置内容版本 | 签名 SHA-256 前 8 位 | 能否被 2.0.0+ 覆盖 |
-|---|---|---|---|---|
-| 1.0.0（早期二改壳） | 1 | ≤ v37 | `53756ef1` | **不能**，签名不同 |
-| 2.0.0（本工程，已发布） | 2 | v43 | `274017a6` | — |
-| 2.0.1 及以后 | 3+ | 递增 | `274017a6` | 能 |
+| App 版本 | versionCode | versionName | 内置内容版本 | 签名 SHA-256 前 8 位 | 能否被 2.0.0+ 覆盖 |
+|---|---|---|---|---|---|
+| 1.0.0（早期二改壳） | 1 | 1.0.0 | ≤ v37 | `53756ef1` | **不能**，签名不同 |
+| 2.0.0（首个自签版本） | 2 | 2.0.0 | v43 | `274017a6` | — |
+| 2.1.0（当前已发布） | 3 | 2.1.0 | v48 | `274017a6` | 能 |
+| 以后每一版 | 4+ | 随意 | 递增 | `274017a6` | 能 |
+
+2.1.0 的改动内容：壳改为真全屏（消除上下黑边）、返回键交给网页优先处理
+（可退出图片管理等管理页）、网页侧生图模型改为弹窗列表选择器。
 
 早期 1.0.0 用的是 Android Debug 证书（`CN=Android Debug`），
 其私钥在原构建机器的 `~/.android/debug.keystore` 里，当前环境没有找到。
@@ -367,6 +460,33 @@ WebView 转去请求真实网络，在 `https://localhost` 上必然失败。
 
 **Maven 依赖下载 403 / 超时**
 `settings.gradle.kts` 已配置阿里云镜像。仍失败时检查网络代理。
+
+**构建报 `Unsupported class file major version` 或 AGP 不兼容**
+JDK 或 Gradle 版本不对。本工程要求 JDK 17 + Gradle 8.7（AGP 8.4.0 / Kotlin 1.9.23）。
+工程故意不带 wrapper，`gradle -v` 必须自己就是 8.7，JDK 21 会失败。
+
+**构建成功但装不上，验签发现没有签名者**
+没配 keystore。这种情况构建**不会报错**，只会静默产出未签名包。
+每次发版都要跑一遍 `apksigner verify --print-certs`，见第六节第 4 步。
+
+**Release 附件下载 404**
+仓库是 Private，附件链接匿名访问就是 404，必须登录有权限的账号。
+要匿名分发得先把仓库改 Public，或用别的渠道传 APK。
+
+**CI 没有触发构建**
+`build-apk.yml` 只在改动 `android/**`、改动该工作流本身、推 `app-v*` 标签
+或手动 dispatch 时跑。只改网页内容不会触发（网页走热更新，本来不需要新 APK）。
+
+**装完还是有上下黑边**
+检查四处是否都在：`MainActivity.enableFullscreen()`、
+`res/values/themes.xml` 的透明系统栏、`res/values/colors.xml` 的浅色窗口底、
+以及网页 viewport 的 `viewport-fit=cover`。少任何一处都会露出黑边。
+注意黑边属于**壳的改动**，必须装 2.1.0 及以上的 APK，热更新解决不了。
+
+**按返回键直接退出了 App，而不是退出当前页面**
+壳会先调网页的 `window.RPHubHandleBack()`，返回 `true` 才不退出。
+新加的弹层或管理页如果没在这个函数里加对应分支，就会表现为直接退出。
+函数在 `assets/js/app.js` 的 `onMounted` 里，属于网页侧，可走热更新修。
 
 ---
 

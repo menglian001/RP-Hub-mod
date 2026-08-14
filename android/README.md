@@ -3,29 +3,45 @@
 把 [RP-Hub](https://github.com/STA1N156/RP-Hub) 网页版打包成 Android 应用，
 内置完整网页内容，支持从远端热更新。
 
-当前已发布：**2.0.0**（versionCode 2，内置内容 v43）
-→ [Releases](https://github.com/menglian001/RP-Hub-mod/releases/tag/v2.0.0)
+当前已发布：**2.1.0**（versionCode 3，内置内容 v48）
+→ [Releases](https://github.com/menglian001/RP-Hub-mod/releases/tag/v2.1.0)
 
 ## 快速开始
 
 **发新版本之前，先读 [OVERRIDE-UPDATE.md](OVERRIDE-UPDATE.md)。**
 那份文档记录了覆盖安装所需的签名证书指纹、密钥保管与交接方式、
-版本号规则和完整发版流程，搞错任何一条都会导致用户装不上，
+打包环境版本组合、版本号规则和完整发版流程，搞错任何一条都会导致用户装不上，
 只能卸载重装（本地聊天记录与 API Key 全部丢失）。
 
 三条硬约束，摘录在此，细节见那份文档：
 
 | 项 | 值 |
 |---|---|
-| 包名 | `cc.salarycat.rphub`（不要改） |
+| 包名 / applicationId | `cc.salarycat.rphub`（不要改） |
 | 签名证书 SHA-256 | `274017a6cc450d8e2a068a409a61e23e9477a0cdb3a004e953945b340a606725` |
-| versionCode | 必须大于已发布的 `2` |
+| key alias | `rphub` |
+| versionCode | 必须大于已发布的 `3` |
 
 签名私钥 `rphub.keystore` **不在仓库里**，需向持有人索取。
+CI 已配好 4 个签名 Secret，**推 `android/**` 或手动 dispatch 就能直接拿到签名包**，
+本地不配 keystore 也能发版，见 OVERRIDE-UPDATE.md 第四节。
 
 **改壳代码、改热更新、加原生接口之前，先读 [SECURITY-PRIVACY.md](SECURITY-PRIVACY.md)。**
 里面写了权限用途、WebView 限制、数据存放位置、第三方 API 外发行为，
 以及一个必须知道的限制：热更新只做 SHA-256 完整性校验，不是代码签名。
+
+### 打包环境
+
+实测通过的组合，版本不对会直接构建失败：
+
+| 组件 | 版本 |
+|---|---|
+| JDK | 17 |
+| Gradle | 8.7（工程无 wrapper，必须系统装） |
+| AGP | 8.4.0 |
+| Kotlin | 1.9.23 |
+| compileSdk / targetSdk / minSdk | 34 / 34 / 24 |
+| build-tools | 34.0.0 |
 
 ### 构建步骤
 
@@ -47,9 +63,15 @@ cd android
 export ANDROID_HOME=/path/to/android-sdk
 export JAVA_HOME=/path/to/jdk-17
 gradle :app:assembleRelease --no-daemon
+
+# 4. 验签，指纹必须是 274017a6...，否则装不上
+"$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs \
+  app/build/outputs/apk/release/app-release.apk | grep "SHA-256 digest"
 ```
 
 产物在 `android/app/build/outputs/apk/release/app-release.apk`。
+
+> 第 2 步跳过时构建**不会报错**，但产物未签名、装不上。第 4 步别省。
 
 > `app/src/main/assets/web/` 是仓库根目录网页内容的副本，
 > 由 `sync-web.sh` 生成，**不入库**，避免同一份内容存两遍。
@@ -105,15 +127,45 @@ assets/web/         APK 内置内容
 | `applyPendingUpdate()` | Boolean | 立即提升已下载内容并刷新 |
 | `saveBase64(name, mime, dataUrl)` | void | 保存文件到下载目录 |
 
+### 反向接口：返回键交给网页处理
+
+壳按返回键时的顺序是：全屏视频 → `webView.canGoBack()` → **问网页** → 退出 App。
+
+单页应用没有历史记录，`canGoBack()` 永远是 false，所以壳会调用网页侧的
+`window.RPHubHandleBack()`：返回 `true` 表示网页自己消化了这次返回，壳不退出；
+返回 `false`、未定义、抛异常、或 400ms 内没回应，都按未处理处理，照旧 `finish()`。
+超时兜底是为了避免网页出问题时返回键被按死。
+
+网页侧实现在 `assets/js/app.js` 的 `onMounted` 里，按层级依次消化：
+图片预览灯箱 → 模型选择器 → 图片管理的角色详情回列表 → 任意管理页回聊天。
+
+**加新的全屏弹层或管理页时，记得在这个函数里加一层**，否则用户按返回键会直接退出 App。
+
+### 全屏行为
+
+`MainActivity.enableFullscreen()` 做三件事：`setDecorFitsSystemWindows(false)`
+边到边、`hide(systemBars())` 隐藏状态栏与导航栏、
+`BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE` 允许从边缘上划临时唤出。
+刘海屏另加 `LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES`，否则横屏挖孔侧留黑条。
+
+`onWindowFocusChanged(true)` 时会重新隐藏一次——切回前台、关掉输入法或系统弹窗后，
+系统栏会自己冒出来。
+
+配套的三处不能少，缺一个就会重新出现黑边：
+
+- `res/values/themes.xml`：系统栏透明 + 允许延伸进挖孔区
+- `res/values/colors.xml`：窗口底色 `#F9FAFB`（与网页一致，否则首屏闪黑）
+- 网页 `index.html` / `novel/index.html` 的 viewport 带 `viewport-fit=cover`
+
 `contentInfo()` 返回示例：
 
 ```json
 {
-  "shellVersion": "2.0.0",
-  "bundledVersion": 43,
+  "shellVersion": "2.1.0",
+  "bundledVersion": 48,
   "activeVersion": 0,
   "stagingVersion": 0,
-  "effectiveVersion": 43,
+  "effectiveVersion": 48,
   "hasActiveContent": false,
   "source": "bundled"
 }
@@ -124,14 +176,15 @@ assets/web/         APK 内置内容
 `gradle.properties`：
 
 ```properties
-bundledContentVersion=43    # 必须与 assets/web/version.json 的 versionCode 一致
+bundledContentVersion=48    # 必须与 assets/web/version.json 的 versionCode 一致
 ```
 
 `app/build.gradle.kts`：
 
 ```kotlin
 applicationId = "cc.salarycat.rphub"    // 不要改，改了就无法覆盖安装
-versionCode = 2                          // 每次发版递增
+versionCode = 3                          // 每次发版递增
+versionName = "2.1.0"
 buildConfigField("String", "UPDATE_BASE_URL", "\"https://rp-hub-mod.pages.dev/\"")
 ```
 
