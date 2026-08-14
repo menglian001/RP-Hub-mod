@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>强制检查更新</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 32px;
+            max-width: 480px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            margin: 0 0 16px;
+            font-size: 24px;
+            color: #1a202c;
+        }
+        .status {
+            padding: 16px;
+            border-radius: 8px;
+            margin: 16px 0;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .info { background: #ebf8ff; color: #2c5282; }
+        .success { background: #f0fff4; color: #22543d; }
+        .error { background: #fff5f5; color: #742a2a; }
+        .warn { background: #fffaf0; color: #744210; }
+        button {
+            width: 100%;
+            padding: 14px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background: #667eea;
+            color: white;
+            margin-top: 8px;
+        }
+        button:hover { background: #5a67d8; }
+        button:active { transform: scale(0.98); }
+        button:disabled {
+            background: #cbd5e0;
+            cursor: not-allowed;
+        }
+        .log {
+            margin-top: 16px;
+            padding: 12px;
+            background: #f7fafc;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🔄 强制检查更新</h1>
+        <div id="status" class="status info">
+            正在检测环境...
+        </div>
+        <button id="updateBtn" disabled>检查更新</button>
+        <button id="reloadBtn" style="background: #48bb78; display: none;">重新加载页面</button>
+        <div id="log" class="log" style="display: none;"></div>
+    </div>
+
+    <script>
+        var statusEl = document.getElementById('status');
+        var updateBtn = document.getElementById('updateBtn');
+        var reloadBtn = document.getElementById('reloadBtn');
+        var logEl = document.getElementById('log');
+        var logs = [];
+
+        function log(msg) {
+            console.log('[ForceUpdate]', msg);
+            logs.push(new Date().toLocaleTimeString() + ' - ' + msg);
+            logEl.textContent = logs.join('\n');
+            logEl.style.display = 'block';
+        }
+
+        function setStatus(msg, type) {
+            statusEl.textContent = msg;
+            statusEl.className = 'status ' + type;
+        }
+
+        function checkEnv() {
+            log('开始环境检测');
+            
+            // 检查是否在 App 内
+            if (typeof window.RPHubNative === 'undefined') {
+                log('未检测到 RPHubNative 桥接对象');
+                setStatus('❌ 请在 RP Hub App 内打开此页面（不是浏览器）', 'error');
+                return false;
+            }
+
+            log('检测到 RPHubNative');
+
+            // 检查方法
+            var methods = [];
+            for (var k in window.RPHubNative) {
+                if (typeof window.RPHubNative[k] === 'function') {
+                    methods.push(k);
+                }
+            }
+            log('可用方法: ' + methods.join(', '));
+
+            if (typeof window.RPHubNative.checkUpdate !== 'function') {
+                log('checkUpdate 方法不存在');
+                setStatus('❌ 壳版本过旧，不支持手动更新', 'error');
+                return false;
+            }
+
+            // 获取当前版本
+            try {
+                var ver = window.RPHubNative.contentVersion();
+                log('当前内容版本: v' + ver);
+                setStatus('✅ 环境正常 | 当前版本: v' + ver + '\n点击下方按钮开始更新', 'success');
+            } catch (e) {
+                log('获取版本失败: ' + e.message);
+                setStatus('⚠️ 环境异常，但可以尝试更新', 'warn');
+            }
+
+            updateBtn.disabled = false;
+            return true;
+        }
+
+        updateBtn.onclick = function() {
+            updateBtn.disabled = true;
+            setStatus('⏳ 正在检查更新...请保持 App 在前台', 'info');
+            log('调用 checkUpdate()');
+
+            try {
+                window.RPHubNative.checkUpdate();
+                log('checkUpdate() 调用成功');
+                
+                setTimeout(function() {
+                    setStatus('✅ 已触发更新检查\n\n如果有新版本，将在 1-2 分钟后弹出提示窗，请点击"立即使用"\n\n如果 3 分钟后没有任何反应，点击下方"重新加载"按钮', 'success');
+                    reloadBtn.style.display = 'block';
+                }, 2000);
+
+            } catch (e) {
+                log('checkUpdate() 调用失败: ' + e.message);
+                setStatus('❌ 调用失败: ' + e.message, 'error');
+                updateBtn.disabled = false;
+            }
+        };
+
+        reloadBtn.onclick = function() {
+            location.reload();
+        };
+
+        // 页面加载后自动检测
+        setTimeout(checkEnv, 500);
+    </script>
+</body>
+</html>
