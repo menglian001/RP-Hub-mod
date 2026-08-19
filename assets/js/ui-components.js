@@ -1052,10 +1052,13 @@
             tool: { type: Object, required: true },
             displayDescription: { type: String, default: '' },
             webTool: Boolean,
+            worldTool: Boolean,
+            worldAccessMode: { type: String, default: 'read' },
+            canConfigureResultCount: { type: Boolean, default: true },
             minResultCount: { type: Number, required: true },
             maxResultCount: { type: Number, required: true }
         },
-        emits: ['close', 'save', 'update:result-count', 'update:tavily-api-key'],
+        emits: ['close', 'save', 'update:result-count', 'update:tavily-api-key', 'update:world-access-mode'],
         template: `
             <modal-shell v-if="show" overlay-class="z-50 bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
                 panel-class="bg-white rounded-2xl border border-gray-200 w-full max-w-3xl flex flex-col shadow-2xl max-h-[90vh] overflow-hidden">
@@ -1078,7 +1081,33 @@
                             <h3 class="mt-4 text-xl md:text-2xl font-bold text-gray-900 leading-tight">{{ tool.name || '未命名工具' }}</h3>
                             <p class="mt-3 text-sm text-gray-500 leading-relaxed whitespace-pre-wrap">{{ displayDescription }}</p>
                         </div>
-                        <div class="max-w-2xl mx-auto bg-white border border-gray-200 rounded-2xl p-5 md:p-6 shadow-sm">
+                        <div v-if="worldTool" class="max-w-2xl mx-auto bg-white border border-gray-200 rounded-2xl p-5 md:p-6 shadow-sm">
+                            <div class="flex items-center justify-between gap-4 mb-4">
+                                <div>
+                                    <div class="text-sm font-bold text-gray-800">世界书权限</div>
+                                    <div class="text-xs text-gray-500 mt-1">控制 AI 能否改动世界书内容</div>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <button type="button" @click="$emit('update:world-access-mode', 'read')"
+                                    class="px-4 py-3 rounded-xl border text-left transition-all"
+                                    :class="worldAccessMode === 'read'
+                                        ? 'border-primary-500 bg-primary-50 text-primary-700 shadow-sm'
+                                        : 'border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100'">
+                                    <div class="text-sm font-bold">阅读</div>
+                                    <div class="text-xs mt-1 opacity-80">列出名字、读取完整内容</div>
+                                </button>
+                                <button type="button" @click="$emit('update:world-access-mode', 'edit')"
+                                    class="px-4 py-3 rounded-xl border text-left transition-all"
+                                    :class="worldAccessMode === 'edit'
+                                        ? 'border-primary-500 bg-primary-50 text-primary-700 shadow-sm'
+                                        : 'border-gray-200 bg-gray-50 text-gray-600 hover:bg-gray-100'">
+                                    <div class="text-sm font-bold">编辑</div>
+                                    <div class="text-xs mt-1 opacity-80">读取内容，也允许修改内容</div>
+                                </button>
+                            </div>
+                        </div>
+                        <div v-if="canConfigureResultCount" class="max-w-2xl mx-auto bg-white border border-gray-200 rounded-2xl p-5 md:p-6 shadow-sm">
                             <div class="flex items-center justify-between gap-4 mb-5">
                                 <div>
                                     <div class="text-sm font-bold text-gray-800">返回条数</div>

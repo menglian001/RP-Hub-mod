@@ -5317,6 +5317,10 @@ const app = createApp({
                 recentGenerationTimes.value = recentGenerationTimes.value.filter(t => !removedMessageIds.has(t.id || t));
                 const nextHistory = chatHistory.value.filter((_, messageIndex) => !removedIndexes.has(messageIndex));
                 const uiCleanup = pruneUiTemplateChangesFromTurn(affectedTurn);
+                // 撤销被删消息里 AI 对世界书做过的改动
+                rollbackWorldInfoMutationsFromMessages(
+                    chatHistory.value.filter((_, messageIndex) => removedIndexes.has(messageIndex))
+                );
                 if (affectedTurn) {
                     await removeVectorMemoriesForConversationTurn(snapshot, affectedTurn);
                     await removeClassicMemoriesForConversationTurn(snapshot, affectedTurn);
@@ -5372,6 +5376,8 @@ const app = createApp({
                     await filterMemoriesAsync(m => (m.turn || 0) < turnAtIndex);
                     removeClassicMemoriesFromTurn(turnAtIndex);
                     const uiCleanup = pruneUiTemplateChangesFromTurn(uiTurnAtIndex);
+                    // 回档会丢弃 index 之后的消息，同步撤销这些消息造成的世界书改动
+                    rollbackWorldInfoMutationsFromMessages(chatHistory.value.slice(index));
                     // Remove timing record for the message being regenerated
                     if (msg && msg.id) {
                         recentGenerationTimes.value = recentGenerationTimes.value.filter(t => (t.id || t) !== msg.id);
@@ -7822,6 +7828,72 @@ const app = createApp({
             results.tavilyMode = 'search';
             results.tavilyResponseTime = data.response_time || '';
             return results;
+        };
+
+        // 世界书编辑模式的回滚支持（移植自上游 1.7.2，上游 1.7.3 起已移除整个工具）。
+        // 删除消息或回档时，把 AI 通过工具做过的世界书改动一并撤销，
+        // 否则被丢弃的那轮对话留下的修改会永久残留。
+        const getWorldInfoRollbackSignature = (entry) => {
+            try {
+                return JSON.stringify(normalizeWorldInfoEntry(entry || {}));
+            } catch (err) {
+                return '';
+            }
+        };
+
+        const findWorldInfoRollbackTargetIndex = (mutation) => {
+            const entries = Array.isArray(worldInfo.value) ? worldInfo.value : [];
+            const afterSignature = getWorldInfoRollbackSignature(mutation?.afterEntry);
+            const sourceIndex = Number(mutation?.sourceIndex);
+            if (Number.isInteger(sourceIndex)
+                && sourceIndex >= 0
+                && sourceIndex < entries.length
+                && getWorldInfoRollbackSignature(entries[sourceIndex]) === afterSignature) {
+                return sourceIndex;
+            }
+            return entries.findIndex(entry => getWorldInfoRollbackSignature(entry) === afterSignature);
+        };
+
+        const syncWorldInfoScopesFromCurrentList = () => {
+            const normalizedWorldInfo = JSON.parse(JSON.stringify(worldInfo.value || [])).map(normalizeWorldInfoEntry);
+            globalWorldInfo.value = normalizedWorldInfo.filter(entry => entry.scope === 'global');
+            if (currentCharacterIndex.value !== -1 && characters.value[currentCharacterIndex.value]) {
+                characters.value[currentCharacterIndex.value].worldInfo = normalizedWorldInfo.filter(entry => entry.scope !== 'global');
+            }
+        };
+
+        const rollbackWorldInfoMutationsFromMessages = (messages = []) => {
+            const mutations = [];
+            (Array.isArray(messages) ? messages : [messages]).forEach(message => {
+                if (!message || !Array.isArray(message.toolCalls)) return;
+                message.toolCalls.forEach(toolCall => {
+                    if (Array.isArray(toolCall?.worldInfoMutations)) {
+                        toolCall.worldInfoMutations.forEach(mutation => {
+                            mutations.push(mutation);
+                        });
+                    }
+                });
+            });
+
+            let applied = 0;
+            let skipped = 0;
+            // 倒序撤销，保证同一条目被多次修改时能逐层退回最初状态
+            [...mutations].reverse().forEach(mutation => {
+                if (!mutation?.beforeEntry || !mutation?.afterEntry) return;
+                const targetIndex = findWorldInfoRollbackTargetIndex(mutation);
+                if (targetIndex < 0) {
+                    skipped += 1;
+                    return;
+                }
+                worldInfo.value.splice(targetIndex, 1, normalizeWorldInfoEntry(cloneForStorage(mutation.beforeEntry)));
+                applied += 1;
+            });
+
+            if (applied > 0) {
+                syncWorldInfoScopesFromCurrentList();
+            }
+
+            return { applied, skipped };
         };
 
         const resetActiveToolResultContext = () => {
@@ -11145,6 +11217,7 @@ const app = createApp({
             isGenerating, isRemoteGenerating, remoteEstimatedTime, isReceiving, isThinking, hasActiveToolInlineWork, isConversationBusy, activeToolContinuationMessageId, activeToolContinuationHasResponse, userInput, pendingChatImages, pendingChatImageReadCount, isRecognizingImages, requestChatImageSelection, handleChatImageSelection, removePendingChatImage, modelSearchQuery, activeModelTag, modelTags, characterSearchQuery, filteredModels, filteredCharacters,
             user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, switchingCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, fontSizeOptions, imageStyleOptions, imageSizeOptions, imageGenCountOptions, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
             activeTools, activeToolAggressivenessOptions: ACTIVE_TOOL_AGGRESSIVENESS_OPTIONS, editingActiveTool, normalizeActiveTools, isWebActiveTool, getActiveToolDisplayDescription, getActiveToolResultCountMin, getActiveToolResultCountMax,
+            isWorldInfoActiveTool, getWorldInfoAccessMode, canConfigureActiveToolResultCount,
             getToolCallModeText, hasThinkingOrTools, isMessageThinkingOrRunning, isThinkingSummaryOpen, toggleThinkingSummary, markThinkingSummaryDetailOpened, getTimelineSteps,
             chatRoundStats, conversationBodyLength, summaryCompressedBodyLength, summaryCompressionRate,
             editingCharacter, editingPreset, editingUiTemplate, toasts, chatContainer, isChatFullscreen, isMobileKeyboardOpen, inputBox, messageElements,
@@ -11493,7 +11566,9 @@ const app = createApp({
                     displayDescription: previous.displayDescription,
                     resultCount: editingActiveTool.data.resultCount,
                     resultCountVersion: ACTIVE_TOOL_RESULT_COUNT_VERSION,
-                    tavilyApiKey: editingActiveTool.data.tavilyApiKey
+                    tavilyApiKey: editingActiveTool.data.tavilyApiKey,
+                    worldInfoAccessMode: editingActiveTool.data.worldInfoAccessMode,
+                    worldInfoAccessModeVersion: ACTIVE_TOOL_WORLD_ACCESS_VERSION
                 });
                 activeTools.value[index] = data;
                 normalizeActiveTools();

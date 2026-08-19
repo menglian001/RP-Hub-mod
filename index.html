@@ -2993,10 +2993,14 @@
         <active-tool-editor-modal :show="showActiveToolEditor" :tool="editingActiveTool.data"
             :display-description="getActiveToolDisplayDescription(editingActiveTool.data)"
             :web-tool="isWebActiveTool(editingActiveTool.data)"
+            :world-tool="isWorldInfoActiveTool(editingActiveTool.data)"
+            :world-access-mode="getWorldInfoAccessMode(editingActiveTool.data)"
+            :can-configure-result-count="canConfigureActiveToolResultCount(editingActiveTool.data)"
             :min-result-count="getActiveToolResultCountMin(editingActiveTool.data)"
             :max-result-count="getActiveToolResultCountMax(editingActiveTool.data)"
             @close="showActiveToolEditor = false" @save="saveActiveTool"
             @update:result-count="editingActiveTool.data.resultCount = $event"
+            @update:world-access-mode="editingActiveTool.data.worldInfoAccessMode = $event"
             @update:tavily-api-key="editingActiveTool.data.tavilyApiKey = $event"></active-tool-editor-modal>
 
         <auto-image-gen-modal :show="showAutoImageGenModal" @decide="setAutoImageGen"></auto-image-gen-modal>
