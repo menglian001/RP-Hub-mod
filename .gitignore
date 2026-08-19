@@ -15,3 +15,6 @@ dist/
 *.keystore
 *.jks
 keystore.properties
+
+# 本地浏览器巡检产出的截图
+.preview-shots/

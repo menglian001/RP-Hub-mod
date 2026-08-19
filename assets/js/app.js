@@ -10714,7 +10714,7 @@ const app = createApp({
                     return;
                 }
                 // 浏览器环境：直接 fetch version.json
-                const base = 'https://rp-hub-merged.pages.dev';
+                const base = 'https://rp-hub-mod.pages.dev';
                 const resp = await fetch(`${base}/version.json?t=${Date.now()}`);
                 if (!resp.ok) return;
                 const manifest = await resp.json();
