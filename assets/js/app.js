@@ -432,7 +432,7 @@ const app = createApp({
         const imageLibraryCategory = ref('all');
         const imageLibrarySearch = ref('');
         const imageLibraryPreview = ref(null);
-        const imageActionMenu = reactive({ show: false, image: null, prompt: '', x: 0, y: 0 });
+
         const imageGenAvailableModels = ref([]);
         const imageGenModelsLoading = ref(false);
         // 生图模型选择器的分类标签，按常见生图模型系列归组
@@ -2374,12 +2374,116 @@ const app = createApp({
             return task.promise;
         };
 
+        // --- POST 模式（OpenAI/Agnes/Vertex/Comfy）的卡片驱动 ---
+        // POST 接口一次性返回整图，没有 /api/jobs 那样的进度回报。为了让卡片
+        // 表现与 GET 模式一致，这里用已耗时驱动同一套进度条：文案显示秒数，
+        // 进度条按时间渐进但封顶 90%，避免假装"已完成"。
+        const POST_IMAGE_PROGRESS_CEILING = 90;
+        const postImageCardTimers = new WeakMap();
+
+        const stopPostImageCardTimer = (card) => {
+            const timer = postImageCardTimers.get(card);
+            if (timer) {
+                window.clearInterval(timer);
+                postImageCardTimers.delete(card);
+            }
+        };
+
+        const setPostImageCardAspectRatio = (card) => {
+            const size = isVertexImageGen() ? getVertexImageSize()
+                : isAgnesImageGen() ? getAgnesImageSize()
+                    : getOpenAIImageSize();
+            const [width, height] = String(size || '').split('x').map(Number);
+            card.style.aspectRatio = (width && height) ? `${width} / ${height}` : '832 / 1216';
+        };
+
+        const startPostImageCardProgress = (card, startedAt) => {
+            stopPostImageCardTimer(card);
+            const tick = () => {
+                if (!card.isConnected) return stopPostImageCardTimer(card);
+                if (card.dataset.imageJobState !== 'loading') return stopPostImageCardTimer(card);
+                const elapsed = (Date.now() - startedAt) / 1000;
+                const label = card.querySelector('.generated-image-progress-label');
+                const bar = card.querySelector('.generated-image-progress-bar');
+                // 指数逼近上限：前期涨得快，越接近封顶越慢
+                const percent = POST_IMAGE_PROGRESS_CEILING * (1 - Math.exp(-elapsed / 18));
+                if (label) label.textContent = `生成中 ${Math.floor(elapsed)}s`;
+                if (bar) bar.style.width = `${percent.toFixed(1)}%`;
+            };
+            tick();
+            postImageCardTimers.set(card, window.setInterval(tick, 1000));
+        };
+
+        const loadPostGeneratedImageCard = async (card, prompt = card?.dataset.imagegenPrompt, options = {}) => {
+            const text = String(prompt || '').trim();
+            if (!card || !text) return { status: 'failed' };
+            ensureGeneratedImageProgressUi(card);
+            const animationTime = performance.now();
+            card.querySelector('.generated-image-spinner')?.style.setProperty('animation-delay', `-${animationTime % 2000}ms`);
+            card.querySelector('.generated-image-spinner-path')?.style.setProperty('animation-delay', `-${animationTime % 1500}ms`);
+            card.querySelector('img')?.setAttribute('alt', '');
+            card.dataset.imagegenPrompt = text;
+            card.dataset.imageJobState = 'loading';
+            card.classList.add('is-generating');
+            card.classList.remove('is-generation-error', 'is-waiting');
+            setPostImageCardAspectRatio(card);
+
+            const startedAt = Date.now();
+            startPostImageCardProgress(card, startedAt);
+
+            const roleUuid = currentCharacter.value?.uuid || '';
+            try {
+                const url = await resolveGeneratedImage(text, { fresh: options.fresh === true });
+                stopPostImageCardTimer(card);
+                if (!card.isConnected) return { status: 'done', imageUrl: url };
+                const image = card.querySelector('img');
+                if (image) {
+                    image.style.height = '100%';
+                    image.src = url;
+                    image.alt = '生成图片';
+                }
+                const bar = card.querySelector('.generated-image-progress-bar');
+                if (bar) bar.style.width = '100%';
+                card.classList.remove('is-generating', 'is-generation-error', 'is-waiting');
+                card.dataset.imageJobState = 'done';
+                if (roleUuid) {
+                    // 与 GET 卡片一致：完成后补记进图片管理
+                    if (card.dataset.imageRemembered !== url) {
+                        card.dataset.imageRemembered = url;
+                        (options.previousUrl
+                            ? replaceRoleImageSource(roleUuid, options.previousUrl, text, url)
+                            : addRoleImage(roleUuid, { src: url, prompt: text, category: 'chat', source: 'generated' })
+                        ).catch(error => console.warn('保存聊天图片失败:', error));
+                    }
+                }
+                return { status: 'done', imageUrl: url };
+            } catch (error) {
+                stopPostImageCardTimer(card);
+                if (!card.isConnected) return { status: 'failed' };
+                const aborted = error?.name === 'AbortError';
+                const detail = aborted ? '生成已中止' : ((error && (error.detail || error.message)) || '生成失败');
+                const label = card.querySelector('.generated-image-progress-label');
+                card.classList.remove('is-generating', 'is-waiting');
+                card.classList.add('is-generation-error');
+                card.dataset.imageJobState = 'failed';
+                if (label) label.textContent = String(detail).slice(0, 80);
+                if (!aborted) console.error('[ImageGen] 生成失败:', error);
+                return { status: 'failed', error: detail };
+            }
+        };
+
         const hydrateGeneratedImages = (root) => {
-            const cards = root?.matches?.('.generated-image-card[data-image-request]')
+            const selector = '.generated-image-card[data-image-request], .generated-image-card[data-imagegen-mode="post"]';
+            const cards = root?.matches?.(selector)
                 ? [root]
-                : [...(root?.querySelectorAll?.('.generated-image-card[data-image-request]') || [])];
+                : [...(root?.querySelectorAll?.(selector) || [])];
             cards.forEach(card => {
-                if (!card.dataset.imageJobState) loadGeneratedImageCard(card);
+                if (card.dataset.imageJobState) return;
+                if (card.dataset.imagegenMode === 'post') {
+                    loadPostGeneratedImageCard(card);
+                } else {
+                    loadGeneratedImageCard(card);
+                }
             });
         };
 
@@ -2428,11 +2532,18 @@ const app = createApp({
                 + mainText.slice(imageMatch.index + imageMatch[0].length);
             const mainStart = message.content.lastIndexOf(mainText);
             if (mainStart < 0) return;
-            const sourceUrl = card.dataset.imageRequest || card.querySelector('img')?.getAttribute('src');
-            if (!sourceUrl) return;
-            const nextImageUrl = new URL(sourceUrl, window.location.href);
-            nextImageUrl.searchParams.set('tag', tags.join(', '));
-            nextImageUrl.searchParams.set('nocache', '1');
+
+            // POST 模式没有可改写的请求 URL，直接拿新提示词重新发一次请求；
+            // GET 模式沿用改写 tag + nocache=1 的方式绕过服务端缓存。
+            const isPostCard = card.dataset.imagegenMode === 'post';
+            let nextImageUrl = null;
+            if (!isPostCard) {
+                const sourceUrl = card.dataset.imageRequest || card.querySelector('img')?.getAttribute('src');
+                if (!sourceUrl) return;
+                nextImageUrl = new URL(sourceUrl, window.location.href);
+                nextImageUrl.searchParams.set('tag', tags.join(', '));
+                nextImageUrl.searchParams.set('nocache', '1');
+            }
 
             const originalContent = message.content;
             const finishLoading = () => {
@@ -2442,7 +2553,12 @@ const app = createApp({
             card.classList.add('is-rerolling');
             button.disabled = true;
 
-            const job = await loadGeneratedImageCard(card, nextImageUrl.href, { fresh: true });
+            const job = isPostCard
+                ? await loadPostGeneratedImageCard(card, tags.join(', '), {
+                    fresh: true,
+                    previousUrl: card.querySelector('img')?.getAttribute('src') || ''
+                })
+                : await loadGeneratedImageCard(card, nextImageUrl.href, { fresh: true });
             if (job.status === 'done') {
                 if (chatHistory.value[messageIndex] !== message || message.content !== originalContent) {
                     finishLoading();
@@ -4284,17 +4400,24 @@ const app = createApp({
             getImageGenArtists(), prompt
         ].join('\u0001'))}`;
 
-        const resolveGeneratedImage = (prompt) => {
+        // options.fresh=true：重新生图时必须绕过缓存，否则同提示词会秒回旧图，
+        // 相当于按钮点了没反应。拿到新图后回填缓存，让后续翻聊天记录仍能命中。
+        const resolveGeneratedImage = (prompt, options = {}) => {
             const key = imageGenCacheKey(prompt);
-            if (imageGenMemoryCache.has(key)) return Promise.resolve(imageGenMemoryCache.get(key));
-            if (imageGenInflight.has(key)) return imageGenInflight.get(key);
+            const fresh = options.fresh === true;
+            if (!fresh) {
+                if (imageGenMemoryCache.has(key)) return Promise.resolve(imageGenMemoryCache.get(key));
+                if (imageGenInflight.has(key)) return imageGenInflight.get(key);
+            }
             const controller = new AbortController();
             imageGenAbortControllers.add(controller);
             const task = (async () => {
-                const stored = await getStoredValue(key).catch(() => undefined);
-                if (typeof stored === 'string' && stored) {
-                    imageGenMemoryCache.set(key, stored);
-                    return stored;
+                if (!fresh) {
+                    const stored = await getStoredValue(key).catch(() => undefined);
+                    if (typeof stored === 'string' && stored) {
+                        imageGenMemoryCache.set(key, stored);
+                        return stored;
+                    }
                 }
                 const url = isComfyImageGenMode()
                     ? await requestComfyImage(prompt, { signal: controller.signal })
@@ -4303,9 +4426,10 @@ const app = createApp({
                 setStoredValue(key, url).catch(() => { });
                 return url;
             })();
-            imageGenInflight.set(key, task);
+            if (!fresh) imageGenInflight.set(key, task);
             task.catch(() => { }).finally(() => {
-                imageGenInflight.delete(key);
+                // fresh 任务没登记 inflight，不能顺手删掉别人正在飞的同 key 任务
+                if (!fresh) imageGenInflight.delete(key);
                 imageGenAbortControllers.delete(controller);
             });
             return task;
@@ -4406,10 +4530,18 @@ const app = createApp({
             });
         };
 
+        // 统一卡片化后，新消息的提示词挂在卡片 div 上，由 hydrateGeneratedImages 接管。
+        // 这里只兜历史消息里遗留的裸 <img> 占位图，并显式跳过卡片内部的 img，
+        // 避免同一张图被占位图逻辑和卡片逻辑同时驱动。
         const scanImageGenPlaceholders = (root) => {
             if (!root || root.nodeType !== 1) return;
-            if (root.matches?.('img[data-imagegen-prompt]')) hydrateImageGenPlaceholder(root);
-            root.querySelectorAll?.('img[data-imagegen-prompt]').forEach(hydrateImageGenPlaceholder);
+            const isInsideCard = (img) => !!img.closest?.('.generated-image-card');
+            if (root.matches?.('img[data-imagegen-prompt]') && !isInsideCard(root)) {
+                hydrateImageGenPlaceholder(root);
+            }
+            root.querySelectorAll?.('img[data-imagegen-prompt]').forEach(img => {
+                if (!isInsideCard(img)) hydrateImageGenPlaceholder(img);
+            });
         };
 
         let imageGenObserver = null;
@@ -4427,84 +4559,6 @@ const app = createApp({
             imageGenObserver = null;
         };
 
-        // --- 聊天内图片长按菜单：分享 / 重新生成 ---
-        let imageLongPressTimer = null;
-        let imageLongPressTarget = null;
-        let ignoreChatImageClickUntil = 0;
-
-        const closeImageActionMenu = () => {
-            imageActionMenu.show = false;
-            imageActionMenu.image = null;
-            imageActionMenu.prompt = '';
-        };
-
-        const getChatGeneratedImage = (target) => target?.closest?.('img[data-imagegen-prompt]') || null;
-
-        const openImageActionMenu = (img, x, y) => {
-            if (!img || img.dataset.imagegenState !== 'done' || !img.src) return;
-            imageActionMenu.image = img;
-            imageActionMenu.prompt = String(img.dataset.imagegenPrompt || '').trim();
-            imageActionMenu.x = Math.max(8, Math.min(Number(x) || 8, window.innerWidth - 176));
-            imageActionMenu.y = Math.max(8, Math.min(Number(y) || 8, window.innerHeight - 120));
-            imageActionMenu.show = true;
-        };
-
-        const clearImageLongPress = () => {
-            if (imageLongPressTimer) window.clearTimeout(imageLongPressTimer);
-            imageLongPressTimer = null;
-            imageLongPressTarget = null;
-        };
-
-        const handleChatImagePointerDown = (event) => {
-            const img = getChatGeneratedImage(event.target);
-            if (!img || event.pointerType === 'mouse') return;
-            clearImageLongPress();
-            imageLongPressTarget = img;
-            imageLongPressTimer = window.setTimeout(() => {
-                if (imageLongPressTarget === img) {
-                    openImageActionMenu(img, event.clientX, event.clientY);
-                    ignoreChatImageClickUntil = Date.now() + 350;
-                }
-                clearImageLongPress();
-            }, 550);
-        };
-
-        const handleChatImageContextMenu = (event) => {
-            const img = getChatGeneratedImage(event.target);
-            if (!img) return;
-            event.preventDefault();
-            openImageActionMenu(img, event.clientX, event.clientY);
-        };
-
-        const shouldIgnoreChatImageClick = () => Date.now() < ignoreChatImageClickUntil;
-
-        const shareChatImage = async () => {
-            const src = imageActionMenu.image?.src;
-            if (!src) return;
-            try {
-                const blob = await fetch(src).then(response => {
-                    if (!response.ok) throw new Error('图片读取失败');
-                    return response.blob();
-                });
-                const file = new File([blob], 'chat-image.png', { type: blob.type || 'image/png' });
-                if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
-                    await navigator.share({ files: [file], title: '聊天生成图片' });
-                    closeImageActionMenu();
-                    return;
-                }
-                const link = document.createElement('a');
-                link.href = src;
-                link.download = 'chat-image.png';
-                link.click();
-                showToast('当前设备不支持系统分享，已开始下载图片', 'info');
-            } catch (error) {
-                console.warn('分享图片失败:', error);
-                showToast('图片分享失败，请重试', 'error');
-            } finally {
-                closeImageActionMenu();
-            }
-        };
-
         const replaceRoleImageSource = async (roleUuid, oldSrc, prompt, newSrc) => {
             if (!roleUuid || !newSrc) return;
             const images = await loadRoleImages(roleUuid);
@@ -4520,38 +4574,11 @@ const app = createApp({
             await addRoleImage(roleUuid, { src: newSrc, prompt, category: 'chat', source: 'generated' });
         };
 
-        const regenerateChatImage = async () => {
-            const img = imageActionMenu.image;
-            const prompt = imageActionMenu.prompt;
-            if (!img || !prompt || img.dataset.imagegenState === 'loading') return;
-            const oldSrc = img.src;
-            const roleUuid = currentCharacter.value?.uuid || '';
-            closeImageActionMenu();
-            img.dataset.imagegenState = 'loading';
-            img.alt = '生成图片(重新生成中)';
-            img.src = createImageGenStatusSrc('loading', '', Date.now());
-            const controller = new AbortController();
-            imageGenAbortControllers.add(controller);
-            const timeout = setTimeout(() => abortSafely(controller, '生图超时'), 120000);
-            try {
-                const url = isComfyImageGenMode()
-                    ? await requestComfyImage(prompt, { signal: controller.signal })
-                    : await requestOpenAIImage(prompt, { signal: controller.signal });
-                await replaceRoleImageSource(roleUuid, oldSrc, prompt, url);
-                img.src = url;
-                img.dataset.imagegenState = 'done';
-                img.alt = '生成图片';
-                showToast('图片已重新生成', 'success');
-            } catch (error) {
-                img.src = oldSrc;
-                img.dataset.imagegenState = 'done';
-                img.alt = '生成图片';
-                showToast(error?.name === 'AbortError' ? '生图超时，请重试' : '图片重新生成失败，已保留原图', 'error');
-            } finally {
-                clearTimeout(timeout);
-                imageGenAbortControllers.delete(controller);
-            }
-        };
+        // 注：原先这里有一套「长按图片弹菜单 → 分享 / 重新生成」的实现
+        // （imageActionMenu / regenerateChatImage / shareChatImage 等）。它从未在
+        // 任何模板里绑定过，功能不可达。现在第三方渠道已统一使用与官方一致的
+        // 卡片内「重新生成图片」按钮，这套代码不再需要，一并移除。
+
         // ============================================================
         // === End POST Image Gen Pipeline ===
         // ============================================================
@@ -9593,19 +9620,21 @@ const app = createApp({
             });
             const wrapperStyle = 'width: auto; height: auto; max-width: 100%; box-sizing: border-box; padding: 2px; border: 1px solid rgba(255,255,255,0.58); background: rgba(255,255,255,0.32); position: relative; border-radius: 12px; overflow: hidden; display: inline-flex; justify-content: center; align-items: center; box-shadow: 0 4px 14px rgba(148,163,184,0.06);';
             const imgStyle = 'max-width: 100%; height: auto; width: auto; display: block; object-fit: contain; border-radius: 9px; transition: transform 0.3s ease;';
-            // OpenAI 兼容模式无法用 <img src> 直接取图，先渲染占位图，
-            // 再由 MutationObserver 读取 data-imagegen-prompt 发起 POST 并回填。
+            // 所有模式统一渲染上游的卡片结构：卡片自带进度条和「重新生成图片」按钮。
             //
-            // GET 直链（默认 NAI 服务）模式改回上游的卡片结构：卡片自带进度条和
-            // 「重新生成图片」按钮，由 loadGeneratedImageCard 走 /api/jobs 轮询，
-            // 点击按钮触发 handleGeneratedImageReroll。之前这里只渲染一个裸 <img>，
-            // 导致 .generated-image-card 从不出现，重新生图按钮无处可点。
+            // GET 直链（默认 NAI 服务）由 loadGeneratedImageCard 走 /api/jobs 轮询；
+            // POST（OpenAI/Agnes/Vertex/Comfy）没有 job 接口，改由
+            // loadPostGeneratedImageCard 发请求并驱动同一套卡片 UI。两者的
+            // 「重新生成图片」按钮都走 handleGeneratedImageReroll，外观与交互一致。
+            //
+            // 区别在于 POST 模式没有 data-image-request（没有可直连的图片 URL），
+            // 靠 data-imagegen-prompt 保存提示词，由 reroll 时重新拼装请求。
             const cardStyle = 'width:100%;height:auto;max-width:100%;box-sizing:border-box;padding:2px;border:1px solid rgba(255,255,255,.58);background:transparent;position:relative;border-radius:12px;overflow:hidden;display:flex;justify-content:center;align-items:center;box-shadow:0 4px 14px rgba(148,163,184,.06)';
             const cardImgStyle = 'max-width:100%;height:100%;width:100%;display:block;object-fit:contain;border-radius:9px;transition:transform .3s ease';
             const rerollButton = '<button type="button" class="generated-image-reroll" title="重新生成图片" aria-label="重新生成图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg></button>';
             const progressBlock = '<div class="generated-image-progress" aria-live="polite"><svg class="generated-image-spinner" viewBox="0 0 50 50" aria-hidden="true"><circle class="generated-image-spinner-path" cx="25" cy="25" r="20" fill="none" stroke-width="2"></circle></svg><span class="generated-image-progress-label">等待生成</span><span class="generated-image-progress-track"><i class="generated-image-progress-bar"></i></span></div>';
             const imageGenReplacement = isOpenAIImageGen()
-                ? '<div style="' + wrapperStyle + '"><img src="' + IMAGE_GEN_PLACEHOLDER_SRC + '" data-imagegen-prompt="$1" alt="生成图片(生成中)" style="' + imgStyle + '"></div>'
+                ? '<div class="generated-image-card is-generating" data-imagegen-mode="post" data-imagegen-prompt="$1" style="' + cardStyle + '"><img alt="" style="' + cardImgStyle + '">' + progressBlock + rerollButton + '</div>'
                 : '<div class="generated-image-card is-generating" data-image-request="' + imageGenSrc + '" data-imagegen-prompt="$1" style="' + cardStyle + '"><img alt="" style="' + cardImgStyle + '">' + progressBlock + rerollButton + '</div>';
             const imageGenRegexContent = {
                 name: imageGenRegexName,
@@ -9663,6 +9692,16 @@ const app = createApp({
             }
             saveData();
             fetchQuota();
+        });
+
+        // 切换生图渠道会改变卡片的驱动方式（GET 走 job 轮询、POST 走直接请求），
+        // 必须重建生图正则，否则切完仍沿用上一个渠道的结构，卡片驱动不上。
+        watch(() => settings.imageGenMode, () => {
+            enforceSpecialRules();
+            if (isAutoImageGenEnabled.value) {
+                updateImageGenRegexState({ enableRegex: true });
+            }
+            saveData();
         });
 
         const prepareLoadedChatHistoryForDisplay = (messages = []) => messages
@@ -11236,8 +11275,6 @@ const app = createApp({
             roleImages, imageLibraryRoleUuid, imageLibraryCategory, imageLibrarySearch, imageLibraryPreview,
             imageLibraryCharacter, filteredRoleImages, openImageLibraryCharacter, closeImageLibraryCharacter,
             setImageLibraryCategory, deleteRoleImage, toggleRoleImageFavorite, loadCurrentRoleImages,
-            imageActionMenu, closeImageActionMenu, shareChatImage, regenerateChatImage,
-            handleChatImagePointerDown, handleChatImageContextMenu, clearImageLongPress,
             vertexImageSizeOptions,
             announcementDialog, dismissAnnouncement, // 公告系统
             // --- End Mod Features Exports ---
