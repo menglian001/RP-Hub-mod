@@ -21,7 +21,12 @@ Roleplay Hub 致力于提供流畅、私密且功能强大的本地化AI Rolepla
 - 剧情分支创建、切换、回档、重命名和完整导入导出
 - UI 模板变量分析与对话状态展示
 - 自动生图、单张重新生成和多套内置画师风格
-- 角色卡生成、万相广场与“墨韵 · 造梦”在线工具
+- 角色卡生成、万相广场与"墨韵 · 造梦"在线工具
+
+二改相对上游额外提供：世界书阅读/管理工具、角色图片库、接口连接测试。
+
+当前网页内容已同步至上游 **RP-Hub 1.8.4**（含记忆二次压缩、UI 模板变量块
+定位优化、版本心跳提醒等）。
 
 ## 快速开始 (Quick Start)
 
@@ -54,20 +59,29 @@ Roleplay-Hub/
 │   └── index.html
 ├── assets/
 │   ├── css/
-│   │   └── styles.css             # 全局样式
-│   └── js/
-│       ├── built-in-content.js    # 默认预设、模式提示词、画师串与更新公告
-│       ├── core-utils.js          # 通用工具、角色卡处理与基础配置
-│       ├── data-services.js       # 存储、记忆、上下文、分支与 UI 状态
-│       ├── runtime-services.js    # API 请求、消息渲染与运行状态
-│       ├── ui-components.js       # 选择器、侧边栏、弹窗与页面组件
-│       └── app.js                 # 主业务入口与页面状态
+│   │   ├── styles.css             # 全局样式
+│   │   └── image-library.css      # 图片管理样式
+│   ├── js/
+│   │   ├── built-in-content.js    # 默认预设、模式提示词、画师串与更新公告
+│   │   ├── core-utils.js          # 通用工具、角色卡处理与基础配置
+│   │   ├── data-services.js       # 存储、记忆、上下文、分支与 UI 状态
+│   │   ├── runtime-services.js    # API 请求、消息渲染、连接测试
+│   │   ├── presence.js            # 匿名在线人数与版本心跳
+│   │   ├── ui-components.js       # 选择器、侧边栏、弹窗与页面组件
+│   │   └── app.js                 # 主业务入口与页面状态
+│   └── vendor/                    # 离线化的第三方库与字体
+├── presence-server/               # 匿名在线人数服务（Node，零依赖）
+├── tools/
+│   ├── fetch-vendor.sh            # 拉取 vendor 离线依赖
+│   └── pack-content.sh            # 打热更新包 content.zip
+├── android/                       # Android 套壳工程
 └── README.md                      # 项目说明
 ```
 
 ### 代码组织说明
 
-页面会按照上方顺序加载 JavaScript 文件，请不要随意调整依赖顺序。
+页面按 `built-in-content` → `core-utils` → `data-services` → `runtime-services`
+→ `presence` → `ui-components` → `app` 的顺序加载，彼此有依赖，请不要调整。
 
 - 修改默认预设、各模式提示词、生图画师串或工具说明时，统一编辑 `built-in-content.js`。
 - 更新公告固定放在 `built-in-content.js` 最底部，方便查找和替换。
@@ -80,8 +94,11 @@ Roleplay-Hub/
 
 本仓库同时维护一个 Android 套壳版，内置完整网页内容并支持热更新。
 
-当前已发布：**2.1.0**（versionCode 3，内置内容 v48）
+当前已发布：**2.1.0**（versionCode 3）
 → [Releases](https://github.com/menglian001/RP-Hub-mod/releases/tag/v2.1.0)
+
+内置内容版本号取仓库提交总数，由 `android/sync-web.sh` 在构建前自动写入
+`gradle.properties` 的 `bundledContentVersion`，无需手动维护。
 
 发版前必读的三条硬约束，任意一条不满足用户就装不上、只能卸载重装（本地数据全丢）：
 

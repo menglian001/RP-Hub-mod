@@ -5,3 +5,13 @@ node_modules/
 .vscode/
 .idea/
 
+# tools/pack-content.sh 的产物：dist/ 与写回根目录的 version.json
+# 两者都由 CI 在部署时生成，不入库避免每次本地打包都脏化工作区
+dist/
+/version.json
+/content.zip
+
+# 签名密钥与本地签名配置，绝不入库
+*.keystore
+*.jks
+keystore.properties
