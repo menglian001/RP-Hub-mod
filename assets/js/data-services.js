@@ -328,21 +328,38 @@
         ? items.filter(isVectorMemory).map(prepareMemoryForRuntime)
         : [];
 
-    const prepareClassicMemoriesForRuntime = (items) => {
-        if (!Array.isArray(items)) return [];
-        return items
-            .filter(memory => memory?.classicMemory === true && String(memory.summary || '').trim())
-            .map(memory => {
-                const { storyTime: _storedStoryTime, ...memoryData } = memory;
-                return markRuntimeRaw({
-                    ...memoryData,
-                    turn: Math.max(1, Number(memory.turn) || 1),
-                    summary: String(memory.summary || '').trim(),
-                    sourceUserIds: Array.isArray(memory.sourceUserIds) ? memory.sourceUserIds.filter(Boolean) : [],
-                    sourceAssistantIds: Array.isArray(memory.sourceAssistantIds) ? memory.sourceAssistantIds.filter(Boolean) : []
-                });
-            });
+    const normalizeClassicMemoryForRuntime = (memory, includeSources = true) => {
+        if (memory?.classicMemory !== true || !String(memory.summary || '').trim()) return null;
+        const { storyTime: _storedStoryTime, ...memoryData } = memory;
+        const fallbackTurn = Math.max(1, Number(memory.turn) || 1);
+        const secondaryCompressed = memory.secondaryCompressed === true;
+        const turnStart = secondaryCompressed
+            ? Math.max(1, Number(memory.turnStart) || fallbackTurn)
+            : fallbackTurn;
+        const turnEnd = secondaryCompressed
+            ? Math.max(turnStart, Number(memory.turnEnd) || fallbackTurn)
+            : fallbackTurn;
+        const normalized = {
+            ...memoryData,
+            turn: secondaryCompressed ? turnEnd : fallbackTurn,
+            summary: String(memory.summary || '').trim(),
+            sourceUserIds: Array.isArray(memory.sourceUserIds) ? memory.sourceUserIds.filter(Boolean) : [],
+            sourceAssistantIds: Array.isArray(memory.sourceAssistantIds) ? memory.sourceAssistantIds.filter(Boolean) : []
+        };
+        if (secondaryCompressed) {
+            normalized.secondaryCompressed = true;
+            normalized.turnStart = turnStart;
+            normalized.turnEnd = turnEnd;
+            normalized.sourceMemories = includeSources && Array.isArray(memory.sourceMemories)
+                ? memory.sourceMemories.map(item => normalizeClassicMemoryForRuntime(item, false)).filter(Boolean)
+                : [];
+        }
+        return markRuntimeRaw(normalized);
     };
+
+    const prepareClassicMemoriesForRuntime = (items) => Array.isArray(items)
+        ? items.map(memory => normalizeClassicMemoryForRuntime(memory)).filter(Boolean)
+        : [];
 
     const splitLongMemoryParagraph = (paragraph, maxLength = 1800) => {
         const text = String(paragraph || '').trim();
@@ -627,6 +644,7 @@
         };
         if (message.id) nextMessage.id = message.id;
         if (Number.isFinite(message._contextFloor)) nextMessage._contextFloor = message._contextFloor;
+        if (message._preventContextMerge === true) nextMessage._preventContextMerge = true;
         if (trackSources) nextMessage._sourceIndexes = getMessageSourceIndexes(message, index, true);
         else if (Array.isArray(message?._sourceIndexes)) nextMessage._sourceIndexes = getMessageSourceIndexes(message, index, false);
         if (Array.isArray(message?._worldInfoEntries)) nextMessage._worldInfoEntries = message._worldInfoEntries;
@@ -647,7 +665,11 @@
 
             const nextMessage = toPlainContextMessage(message, index, trackSources);
             const previous = merged[merged.length - 1];
-            if (previous && previous.role === nextMessage.role && mergeRoleSet.has(nextMessage.role)) {
+            if (previous
+                && previous.role === nextMessage.role
+                && mergeRoleSet.has(nextMessage.role)
+                && previous._preventContextMerge !== true
+                && nextMessage._preventContextMerge !== true) {
                 previous.content = [previous.content, nextMessage.content].filter(Boolean).join('\n\n');
                 if (!previous.name && nextMessage.name) previous.name = nextMessage.name;
                 if (Number.isFinite(nextMessage._contextFloor)) {
@@ -885,6 +907,7 @@
             name: getDisplayName(entry),
             triggers: getTriggerText(entry)
         }));
+        let displayedFloor = 0;
         const contextMessages = (Array.isArray(messages) ? messages : []).map(message => {
             const injectedWorldInfos = new Map();
             (Array.isArray(message._worldInfoEntries) ? message._worldInfoEntries : []).forEach(entry => {
@@ -936,7 +959,7 @@
                 name: message.name,
                 content: message.content,
                 renderedContent,
-                floor: Number.isFinite(message._contextFloor) ? message._contextFloor : null,
+                floor: Number.isFinite(message._contextFloor) ? ++displayedFloor : null,
                 isMemory,
                 wiTriggers: Array.from(injectedWorldInfos.entries()).map(([name, triggers]) => ({ name, triggers }))
             };
@@ -1612,15 +1635,30 @@ ${content}
     };
 
     const UI_TEMPLATE_UPDATES_PATTERN = /<ui_template_updates\b[^>]*>([\s\S]*?)<\/ui_template_updates>|(\{\s*"updates"\s*:[\s\S]*$)/i;
-    const UI_TEMPLATE_UPDATES_STRIP_PATTERN = /<ui_template_updates\b[^>]*>[\s\S]*?<\/ui_template_updates>/gi;
-    const UI_TEMPLATE_UPDATES_OPEN_STRIP_PATTERN = /<ui_template_updates\b[^>]*>[\s\S]*$/i;
-    const UI_TEMPLATE_UPDATES_JSON_STRIP_PATTERN = /\{\s*"updates"\s*:[\s\S]*$/i;
+    const findUiTemplateUpdateBlock = (text) => {
+        const source = String(text || '');
+        const taggedCandidate = window.RPHubCardUtils.findLastUnprotectedMatch(source, /<ui_template_updates\b[^>]*>/i);
+        const taggedTail = taggedCandidate ? source.slice(taggedCandidate.index).trimEnd() : '';
+        const tagged = taggedTail.match(/^<ui_template_updates\b[^>]*>([\s\S]*?)(?:<\/ui_template_updates>)?$/i);
+        if (tagged) {
+            const result = [taggedTail, tagged[1], undefined];
+            result.index = taggedCandidate.index;
+            return result;
+        }
+        const candidate = window.RPHubCardUtils.findLastUnprotectedMatch(source, /\{\s*"updates"\s*:/i);
+        if (!candidate) return null;
+        const tail = source.slice(candidate.index).trimEnd();
+        if (!/^\{\s*"updates"\s*:/i.test(tail)) return null;
+        const result = [tail, undefined, tail];
+        result.index = candidate.index;
+        return result;
+    };
 
-    const stripUiTemplateUpdateBlock = (text) => String(text || '')
-        .replace(UI_TEMPLATE_UPDATES_STRIP_PATTERN, '')
-        .replace(UI_TEMPLATE_UPDATES_OPEN_STRIP_PATTERN, '')
-        .replace(UI_TEMPLATE_UPDATES_JSON_STRIP_PATTERN, '')
-        .trimEnd();
+    const stripUiTemplateUpdateBlock = (text) => {
+        const source = String(text || '');
+        const match = findUiTemplateUpdateBlock(source);
+        return match ? source.slice(0, match.index).trimEnd() : source;
+    };
 
     const createDetailedJsonSyntaxError = (error, content) => {
         const positionMatch = String(error?.message || '').match(/position\s+(\d+)/i);
@@ -1874,6 +1912,7 @@ ${content}
         cloneUiObject,
         cloneUiValue,
         createExecutableHtmlIframe,
+        findUiTemplateUpdateBlock,
         getUiTemplateValue,
         inferInitialUiTemplateState,
         normalizeUiTemplate,

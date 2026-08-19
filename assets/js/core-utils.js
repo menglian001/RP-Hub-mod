@@ -283,13 +283,32 @@ window.RPHubUtils = {
         return { pattern: normalizedPattern, flags: normalizedFlags };
     };
 
-    const protectedContentPattern = /(<!DOCTYPE html>[\s\S]*?<\/html>|<html\b[^>]*>[\s\S]*?<\/html>|<script\b[^>]*>[\s\S]*?<\/script>|<style\b[^>]*>[\s\S]*?<\/style>|<(?:cot|think)>[\s\S]*?(?:<\/(?:cot|think)>|<(?:cot|think)>|$)|```[\s\S]*?```|`[^`]+`|<\/?[a-zA-Z][\w:-]*[^>]*>)/gi;
-    const exactProtectedContentPattern = /^(<!DOCTYPE html>[\s\S]*?<\/html>|<html\b[^>]*>[\s\S]*?<\/html>|<script\b[^>]*>[\s\S]*?<\/script>|<style\b[^>]*>[\s\S]*?<\/style>|<(?:cot|think)>[\s\S]*?(?:<\/(?:cot|think)>|<(?:cot|think)>|$)|```[\s\S]*?```|`[^`]+`|<\/?[a-zA-Z][\w:-]*[^>]*>)$/i;
-
+    const protectedContentPattern = /(<!DOCTYPE html>[\s\S]*?<\/html>|<html\b[^>]*>[\s\S]*?<\/html>|<script\b[^>]*>[\s\S]*?<\/script>|<style\b[^>]*>[\s\S]*?<\/style>|<!DOCTYPE html>[\s\S]*$|<html\b[^>]*>[\s\S]*$|<script\b[^>]*>[\s\S]*$|<style\b[^>]*>[\s\S]*$|<(?:cot|think)>[\s\S]*?(?:<\/(?:cot|think)>|<(?:cot|think)>|$)|```[\s\S]*?```|```[\s\S]*$|`[^`]+`|<\/?(?!ui_template_updates\b)[a-zA-Z][\w:-]*[^>]*>)/gi;
+    const exactProtectedContentPattern = /^(<!DOCTYPE html>[\s\S]*?<\/html>|<html\b[^>]*>[\s\S]*?<\/html>|<script\b[^>]*>[\s\S]*?<\/script>|<style\b[^>]*>[\s\S]*?<\/style>|<!DOCTYPE html>[\s\S]*$|<html\b[^>]*>[\s\S]*$|<script\b[^>]*>[\s\S]*$|<style\b[^>]*>[\s\S]*$|<(?:cot|think)>[\s\S]*?(?:<\/(?:cot|think)>|<(?:cot|think)>|$)|```[\s\S]*?```|```[\s\S]*$|`[^`]+`|<\/?(?!ui_template_updates\b)[a-zA-Z][\w:-]*[^>]*>)$/i;
     const transformUnprotectedText = (text, transform) => String(text || '')
         .split(protectedContentPattern)
         .map(part => !part || exactProtectedContentPattern.test(part) ? part : transform(part))
         .join('');
+
+    const findLastUnprotectedMatch = (text, pattern) => {
+        const source = String(text || '');
+        let offset = 0;
+        let lastMatch = null;
+        source.split(protectedContentPattern).forEach(part => {
+            if (!part) return;
+            if (!exactProtectedContentPattern.test(part)) {
+                const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
+                const matcher = new RegExp(pattern.source, flags.replace('y', ''));
+                let match;
+                while ((match = matcher.exec(part)) !== null) {
+                    lastMatch = { index: offset + match.index, text: match[0] };
+                    if (!match[0]) matcher.lastIndex += 1;
+                }
+            }
+            offset += part.length;
+        });
+        return lastMatch;
+    };
 
     const encodeUtf8 = (value) => {
         if (textEncoder) return textEncoder.encode(String(value ?? ''));
@@ -889,6 +908,7 @@ window.RPHubUtils = {
         encodeBase64Utf8,
         extractNativeReasoning,
         findPngCharacterPayload,
+        findLastUnprotectedMatch,
         getImageStyleArtists,
         imageUrlToPngBytes,
         injectPngTextChunk,

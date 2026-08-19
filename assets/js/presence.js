@@ -5,6 +5,11 @@
         .trim()
         .replace(/\/+$/, '');
     const storageKey = 'rphub_presence_client_id';
+    const parseVersionId = value => /^\d{5}$/.test(String(value ?? '').trim())
+        ? Number(value)
+        : null;
+    const currentVersionId = parseVersionId(window.RPHubLatestUpdate?.id);
+    let notifiedVersionId = 0;
 
     const createClientId = () => {
         if (typeof crypto?.randomUUID === 'function') return crypto.randomUUID().replaceAll('-', '');
@@ -34,11 +39,18 @@
                 const response = await fetch(`${apiUrl}/v1/presence`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ clientId: getClientId() })
+                    body: JSON.stringify({ clientId: getClientId(), versionId: currentVersionId })
                 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
                 online.value = Number.isFinite(data.online) ? data.online : null;
+                const latestVersionId = parseVersionId(data.latestVersionId);
+                if (data.updateAvailable && latestVersionId > currentVersionId && latestVersionId > notifiedVersionId) {
+                    notifiedVersionId = latestVersionId;
+                    window.dispatchEvent(new CustomEvent('rphub:update-available', {
+                        detail: { versionId: latestVersionId }
+                    }));
+                }
             } catch {
                 online.value = null;
             }
