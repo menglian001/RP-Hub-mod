@@ -2953,63 +2953,6 @@
             @update:search-query="modelSearchQuery = $event"
             @update:active-tag="activeModelTag = $event"></model-selector-modal>
 
-        <add-character-modal :show="showAddCharacterMenu" @close="showAddCharacterMenu = false"
-            @create="createNewCharacter(); showAddCharacterMenu = false"
-            @import-character="importCharacter($event); showAddCharacterMenu = false"></add-character-modal>
-
-        <character-editor-modal :show="showCharacterEditor" :character="editingCharacter.data"
-            :editing="editingCharacter.id !== undefined" :tab="editorTab" @close="closeCharacterEditor"
-            @save="saveCharacter" @avatar-upload="handleAvatarUpload" @update:tab="editorTab = $event"
-            @update-field="editingCharacter.data[$event.field] = $event.value"></character-editor-modal>
-
-        <preset-editor-modal :show="showPresetEditor" :preset="editingPreset.data"
-            :editing="editingPreset.id !== undefined" :role-options="presetRoleOptions"
-            :role-label="getPresetRoleLabel(editingPreset.data)" @close="showPresetEditor = false"
-            @save="savePreset" @update:name="editingPreset.data.name = $event"
-            @update:role="editingPreset.data.role = $event"
-            @update:content="editingPreset.data.content = $event"></preset-editor-modal>
-
-        <ui-template-editor-modal :show="showUiTemplateEditor" :template-data="editingUiTemplate.data"
-            :editing="editingUiTemplate.id !== undefined" :tab="editingUiTemplate.tab"
-            :preview-html="showUiTemplateEditor && editingUiTemplate.tab === 'edit' ? renderEditingUiTemplatePreview() : ''" :scope-options="scopeOptions"
-            :placement-options="uiTemplatePlacementOptions" @close="showUiTemplateEditor = false"
-            @save="saveUiTemplate" @update:tab="editingUiTemplate.tab = $event"
-            @update-field="editingUiTemplate.data[$event.field] = $event.value"></ui-template-editor-modal>
-
-        <regex-editor-modal :show="showRegexEditor" :script="editingRegex.data"
-            :editing="editingRegex.id !== undefined" :scope-options="scopeOptions"
-            @close="showRegexEditor = false" @save="saveRegex"
-            @update-field="editingRegex.data[$event.field] = $event.value"></regex-editor-modal>
-
-        <active-tool-editor-modal :show="showActiveToolEditor" :tool="editingActiveTool.data"
-            :display-description="getActiveToolDisplayDescription(editingActiveTool.data)"
-            :web-tool="isWebActiveTool(editingActiveTool.data)"
-            :min-result-count="getActiveToolResultCountMin(editingActiveTool.data)"
-            :max-result-count="getActiveToolResultCountMax(editingActiveTool.data)"
-            @close="showActiveToolEditor = false" @save="saveActiveTool"
-            @update:result-count="editingActiveTool.data.resultCount = $event"
-            @update:tavily-api-key="editingActiveTool.data.tavilyApiKey = $event"></active-tool-editor-modal>
-
-        <auto-image-gen-modal :show="showAutoImageGenModal" @decide="setAutoImageGen"></auto-image-gen-modal>
-        <export-selection-modal :show="showExportModal" :items="exportItems" :selected="selectedExportIndices"
-            @close="showExportModal = false" @select-all="selectAllExportItems"
-            @deselect-all="deselectAllExportItems" @toggle="toggleExportSelection"
-            @confirm="confirmExport"></export-selection-modal>
-
-        <character-export-modal :show="showCharacterExportModal" @close="showCharacterExportModal = false"
-            @export="confirmCharacterExport"></character-export-modal>
-
-        <world-info-editor-modal :show="showWorldInfoEditor" :entry="editingWorldInfo.data"
-            :editing="editingWorldInfo.id !== undefined" :keys-text="worldInfoKeysText"
-            :scope-options="scopeOptions" :position-options="worldInfoPositionOptions"
-            @close="showWorldInfoEditor = false" @save="saveWorldInfo"
-            @update-field="editingWorldInfo.data[$event.field] = $event.value"
-            @update-keys="updateEditingWorldInfoKeys"></world-info-editor-modal>
-
-        <context-viewer-modal :show="showContextViewerModal" :floors="lastContextFloorCount"
-            :total-length="lastContextTotalLength" :world-infos="lastTriggeredWorldInfos"
-            :messages="lastContextMessages" @close="showContextViewerModal = false"></context-viewer-modal>
-
         <!-- 生图模型选择器：与文本模型共用组件，数据源为生图接口返回的列表 -->
         <model-selector-modal :show="showImageGenModelSelector" target="imageGenModel"
             :search-query="imageGenModelSearchQuery" :active-tag="imageGenModelActiveTag"
@@ -3072,7 +3015,7 @@
             @update-field="editingWorldInfo.data[$event.field] = $event.value"
             @update-keys="updateEditingWorldInfoKeys"></world-info-editor-modal>
 
-        <context-viewer-modal :show="showContextViewerModal" :floors="chatRoundStats.floors"
+        <context-viewer-modal :show="showContextViewerModal" :floors="lastContextFloorCount"
             :total-length="lastContextTotalLength" :world-infos="lastTriggeredWorldInfos"
             :messages="lastContextMessages" @close="showContextViewerModal = false"></context-viewer-modal>
 
