@@ -1983,6 +1983,9 @@ const app = createApp({
             try {
                 await initDB();
 
+                // 必须早于首屏消息渲染：卡片 hydrate 时要查这张表才能不重复生图
+                await loadGeneratedImageReuse();
+
                 // Load from DB
                 const savedChars = await getStoredValue('characters');
                 if (savedChars) {
@@ -2235,12 +2238,7 @@ const app = createApp({
             const roleUuid = currentCharacter.value?.uuid || '';
             if (!roleUuid || !imageUrl || !card) return;
             if (card.dataset.imageRemembered === imageUrl) return;
-            let prompt = '';
-            try {
-                prompt = new URL(card.dataset.imageRequest || '', window.location.href)
-                    .searchParams.get('tag') || '';
-            } catch { prompt = ''; }
-            prompt = String(prompt || card.dataset.imagegenPrompt || '').trim();
+            const prompt = getGeneratedCardPrompt(card);
             if (!prompt) return;
             card.dataset.imageRemembered = imageUrl;
             addRoleImage(roleUuid, { src: imageUrl, prompt, category: 'chat', source: 'generated' })
@@ -2289,7 +2287,10 @@ const app = createApp({
             card.dataset.imageJobState = job.status;
             // 卡片模式下提示词存在卡片上，完成后补记进图片管理，
             // 与占位图模式（hydrateImageGenPlaceholder）保持一致。
-            if (job.status === 'done') rememberGeneratedCardImage(card, imageUrl);
+            if (job.status === 'done') {
+                rememberSessionGeneratedImage(getGeneratedCardPrompt(card), imageUrl);
+                rememberGeneratedCardImage(card, imageUrl);
+            }
         };
 
         const startGeneratedImageTask = (requestUrl, fresh = false) => {
@@ -2337,6 +2338,110 @@ const app = createApp({
             });
             generatedImageTasks.set(key, task);
             return task;
+        };
+
+        // 切画风/比例会重建生图正则，Vue 随之替换消息 DOM，卡片变成全新元素、
+        // 丢掉 imageJobState，于是被当成新卡片重新生成一遍。这里按提示词原文记住
+        // 已经出过的图，卡片重建时直接回填，不再发请求——想换图请点卡片上的
+        // 「重新生成图片」按钮，切换设置只影响之后的新图。
+        //
+        // 键刻意只用提示词，不掺画风/尺寸/渠道：imageGenCacheKey 那层含这些参数，
+        // 换画风后键就变了，等于认不出"这张画过了"。本表要的就是跨设置变更认人。
+        // 持久化到 IndexedDB，刷新页面、切角色卡往返后同样不重生。
+        const GENERATED_IMAGE_REUSE_STORAGE_KEY = 'imagegen_reuse_by_prompt';
+        const GENERATED_IMAGE_REUSE_LIMIT = 500;
+        const generatedImageReuse = new Map();
+        let generatedImageReuseLoaded = false;
+
+        const loadGeneratedImageReuse = async () => {
+            if (generatedImageReuseLoaded) return;
+            generatedImageReuseLoaded = true;
+            try {
+                const stored = await getStoredValue(GENERATED_IMAGE_REUSE_STORAGE_KEY);
+                if (Array.isArray(stored)) {
+                    stored.forEach(([prompt, url]) => {
+                        if (typeof prompt === 'string' && typeof url === 'string' && prompt && url) {
+                            generatedImageReuse.set(prompt, url);
+                        }
+                    });
+                }
+            } catch (error) {
+                console.warn('读取生图复用记录失败:', error);
+            }
+        };
+
+        let generatedImageReuseSaveTimer = null;
+        const scheduleGeneratedImageReuseSave = () => {
+            if (generatedImageReuseSaveTimer) return;
+            generatedImageReuseSaveTimer = window.setTimeout(() => {
+                generatedImageReuseSaveTimer = null;
+                // Map 迭代按插入序，超限时丢最早的
+                const entries = [...generatedImageReuse.entries()].slice(-GENERATED_IMAGE_REUSE_LIMIT);
+                setStoredValue(GENERATED_IMAGE_REUSE_STORAGE_KEY, entries)
+                    .catch(error => console.warn('保存生图复用记录失败:', error));
+            }, 800);
+        };
+
+        // 提示词优先取请求 URL 的 tag 参数：重新生图会改写 tag，它比卡片上的
+        // 初始 data-imagegen-prompt 更准（与 rememberGeneratedCardImage 一致）。
+        const getGeneratedCardPrompt = (card) => {
+            let prompt = '';
+            try {
+                prompt = new URL(card?.dataset?.imageRequest || '', window.location.href)
+                    .searchParams.get('tag') || '';
+            } catch { prompt = ''; }
+            return String(prompt || card?.dataset?.imagegenPrompt || '').trim();
+        };
+
+        const rememberSessionGeneratedImage = (prompt, url) => {
+            const key = String(prompt || '').trim();
+            if (!key || !url) return;
+            // 重新插入以刷新 LRU 位置，避免常用图被裁掉
+            generatedImageReuse.delete(key);
+            generatedImageReuse.set(key, url);
+            scheduleGeneratedImageReuseSave();
+        };
+
+        const forgetSessionGeneratedImage = (prompt) => {
+            const key = String(prompt || '').trim();
+            if (key && generatedImageReuse.delete(key)) scheduleGeneratedImageReuseSave();
+        };
+
+        // 返回 true 表示这张卡片已用记录里的旧图填好，调用方不要再发请求
+        const restoreGeneratedImageCard = (card) => {
+            const prompt = getGeneratedCardPrompt(card);
+            const url = generatedImageReuse.get(prompt);
+            if (!url) return false;
+            const image = card.querySelector('img');
+            if (image) {
+                image.style.height = '100%';
+                // 记录可能已失效（GET 渠道复用的是 job 内容地址，服务端会清理）。
+                // 加载失败就丢掉记录、退回正常生成流程，避免卡在破图上。
+                image.onerror = () => {
+                    image.onerror = null;
+                    if (generatedImageReuse.get(prompt) !== url) return;
+                    forgetSessionGeneratedImage(prompt);
+                    delete card.dataset.imageJobState;
+                    delete card.dataset.imageRemembered;
+                    if (!card.isConnected) return;
+                    if (card.dataset.imagegenMode === 'post') {
+                        loadPostGeneratedImageCard(card);
+                    } else {
+                        loadGeneratedImageCard(card);
+                    }
+                };
+                image.src = url;
+                image.alt = '生成图片';
+            }
+            const bar = card.querySelector('.generated-image-progress-bar');
+            if (bar) bar.style.width = '100%';
+            const label = card.querySelector('.generated-image-progress-label');
+            if (label) label.textContent = '已生成';
+            card.classList.remove('is-generating', 'is-generation-error', 'is-waiting');
+            card.dataset.imageJobState = 'done';
+            // 已经记过图片管理，避免重建卡片时重复写入
+            card.dataset.imageRemembered = url;
+            return true;
         };
 
         const ensureGeneratedImageProgressUi = (card) => {
@@ -2444,8 +2549,12 @@ const app = createApp({
                 }
                 const bar = card.querySelector('.generated-image-progress-bar');
                 if (bar) bar.style.width = '100%';
+                // 计时器停在"生成中 Ns"，完成后归位，与 restoreGeneratedImageCard 一致
+                const doneLabel = card.querySelector('.generated-image-progress-label');
+                if (doneLabel) doneLabel.textContent = '已生成';
                 card.classList.remove('is-generating', 'is-generation-error', 'is-waiting');
                 card.dataset.imageJobState = 'done';
+                rememberSessionGeneratedImage(text, url);
                 if (roleUuid) {
                     // 与 GET 卡片一致：完成后补记进图片管理
                     if (card.dataset.imageRemembered !== url) {
@@ -2479,6 +2588,8 @@ const app = createApp({
                 : [...(root?.querySelectorAll?.(selector) || [])];
             cards.forEach(card => {
                 if (card.dataset.imageJobState) return;
+                // 切画风/比例导致的卡片重建：同提示词已经出过图就直接复用，不重复消耗额度
+                if (restoreGeneratedImageCard(card)) return;
                 if (card.dataset.imagegenMode === 'post') {
                     loadPostGeneratedImageCard(card);
                 } else {
@@ -2552,6 +2663,10 @@ const app = createApp({
             };
             card.classList.add('is-rerolling');
             button.disabled = true;
+            // 手动重新生图要绕过复用记录：清掉旧提示词的记录，
+            // 新图完成后由 loadXxx 的完成回调按新提示词重新登记
+            forgetSessionGeneratedImage(getGeneratedCardPrompt(card));
+            forgetSessionGeneratedImage(tags.join(', '));
 
             const job = isPostCard
                 ? await loadPostGeneratedImageCard(card, tags.join(', '), {
@@ -4455,6 +4570,7 @@ const app = createApp({
                 }
             }, 1000);
             resolveGeneratedImage(prompt).then(async (url) => {
+                rememberSessionGeneratedImage(prompt, url);
                 await rememberImage(url);
                 stopImageGenTimer(img);
                 img.dataset.imagegenState = 'done';
@@ -4502,6 +4618,15 @@ const app = createApp({
             if (currentSrc && !currentSrc.startsWith('data:image/svg+xml')) {
                 rememberImage(currentSrc);
                 img.dataset.imagegenState = 'done';
+                img.alt = '生成图片';
+                return;
+            }
+            // 与卡片一致：同提示词已出过图就复用，切画风不重复消耗额度
+            const sessionUrl = generatedImageReuse.get(String(prompt || '').trim());
+            if (sessionUrl) {
+                rememberImage(sessionUrl);
+                img.dataset.imagegenState = 'done';
+                img.src = sessionUrl;
                 img.alt = '生成图片';
                 return;
             }
@@ -10220,6 +10345,8 @@ const app = createApp({
                 return;
             }
             clearPendingChatImages();
+            // 复用记录按提示词原文索引，跨角色撞车概率极低，且底层 imageGenMemoryCache
+            // 本来就是全局共享的。这里不清空，换卡往返才不会重新生成整屏历史图。
             const switchEpoch = ++_characterSwitchEpoch;
             const isLatestSwitch = () => switchEpoch === _characterSwitchEpoch;
             switchingCharacterIndex.value = index;
