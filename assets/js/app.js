@@ -299,10 +299,25 @@ const app = createApp({
             return getImageGenBaseUrl() + (path.startsWith('/') ? path : `/${path}`);
         };
 
+        // 2K / 4K 档位以前和 1K 映射到同一个值，等于下拉框里的高 K 选项完全无效。
+        // 现在给出真实递增的尺寸：短边 1024 -> 1536 -> 2048，长边按比例放大，
+        // 所有值都能被 16 整除（gpt-image-2 等模型有此要求）。
+        // 上游不接受大尺寸时由 OPENAI_IMAGE_SIZE_FALLBACKS 自动回退，不会直接失败。
         const OPENAI_IMAGE_SIZE_MAP = {
-            '竖图': '1024x1536', '2K竖图': '1024x1536', '4K竖图': '1024x1536',
-            '横图': '1536x1024', '2K横图': '1536x1024', '4K横图': '1536x1024',
-            '方图': '1024x1024', '2K方图': '1024x1024', '4K方图': '1024x1024'
+            '竖图': '1024x1536', '2K竖图': '1536x2304', '4K竖图': '2048x3072',
+            '横图': '1536x1024', '2K横图': '2304x1536', '4K横图': '3072x2048',
+            '方图': '1024x1024', '2K方图': '2048x2048', '4K方图': '3072x3072'
+        };
+
+        // 各档位的降级链，从高到低。上游因尺寸报错时依次往下试，
+        // 最后一档一定是 OpenAI 官方三种标准尺寸之一，保证兜得住。
+        const OPENAI_IMAGE_SIZE_FALLBACKS = {
+            '4K竖图': ['2048x3072', '1536x2304', '1024x1536'],
+            '2K竖图': ['1536x2304', '1024x1536'],
+            '4K横图': ['3072x2048', '2304x1536', '1536x1024'],
+            '2K横图': ['2304x1536', '1536x1024'],
+            '4K方图': ['3072x3072', '2048x2048', '1024x1024'],
+            '2K方图': ['2048x2048', '1024x1024']
         };
         const AGNES_IMAGE_SIZE_MAP = {
             '竖图': '768x1024', '2K竖图': '768x1024', '4K竖图': '768x1024',
@@ -330,6 +345,11 @@ const app = createApp({
         const isGptImageModel = (model) => /^(?:gpt-image|chatgpt-image)/i
             .test(String(model || '').trim().split('/').pop());
         const getOpenAIImageSize = () => OPENAI_IMAGE_SIZE_MAP[settings.imageSize] || '1024x1024';
+        // 当前档位要尝试的尺寸序列（含降级）。非高 K 档位只有一个值。
+        const getOpenAIImageSizeChain = () => {
+            const chain = OPENAI_IMAGE_SIZE_FALLBACKS[settings.imageSize];
+            return Array.isArray(chain) && chain.length ? chain.slice() : [getOpenAIImageSize()];
+        };
         const getAgnesImageSize = () => AGNES_IMAGE_SIZE_MAP[settings.imageSize] || '1024x1024';
         const getVertexImageSize = () => VERTEX_IMAGE_SIZE_MAP[settings.vertexImageSize] || VERTEX_IMAGE_SIZE_MAP.vertex_2_3;
         const getVertexImageRatio = () => VERTEX_IMAGE_RATIO_MAP[settings.vertexImageSize] || '2:3';
@@ -4208,6 +4228,23 @@ const app = createApp({
             throw new Error(`响应中没有图片数据：${rawHint}`);
         };
 
+        // 上游明确不支持 base64 返回时的报错特征 —— 只有这种情况才值得改用
+        // response_format: 'url' 重试。额度、审核、鉴权类 400 一律直接抛出，
+        // 否则会白白多发一次请求，还会用第二次的错误盖掉真实原因。
+        const isUnsupportedFormatError = (error) => {
+            const text = `${error && error.message || ''} ${error && error.detail || ''}`.toLowerCase();
+            return /b64_json|base64|response_format|output format/.test(text);
+        };
+
+        // 上游拒绝所请求尺寸时的报错特征。命中说明换个小一点的尺寸就能成，
+        // 与「参数名不被认识」是两回事，降级方式也不同。
+        const isUnsupportedSizeError = (error) => {
+            const text = `${error && error.message || ''} ${error && error.detail || ''}`.toLowerCase();
+            if (/\bsize\b|resolution|dimension|width|height|too large|max(?:imum)? pixel/.test(text)) return true;
+            // 有些上游只回 invalid value 而不点名字段，也当作尺寸问题试一次
+            return /invalid value|not one of|must be one of/.test(text);
+        };
+
         // 上游拒绝某个参数时的报错关键词。命中就说明不是内容/额度问题，
         // 而是请求体本身多带了字段，值得去掉后重试一次。
         const isUnsupportedParamError = (error) => {
@@ -4215,15 +4252,15 @@ const app = createApp({
             return /unknown parameter|unsupported parameter|unrecognized|not supported|invalid_request_error|extra fields|response_format/.test(text);
         };
 
-        const requestOpenAIImage = async (prompt, options = {}) => {
-            const artists = options.withArtists === false ? '' : getImageGenArtists();
-            const fullPrompt = [prompt, artists].map(part => String(part || '').trim()).filter(Boolean).join(', ');
-            const signal = options.signal;
+        // 单次尺寸下的完整请求（含 response_format 的两级降级）。
+        const attemptOpenAIImage = async (fullPrompt, signal, options) => {
             try {
                 return await postOpenAIImage(fullPrompt, 'b64_json', signal, '', options);
             } catch (error) {
                 if (!error || error.status !== 400) throw error;
-                // 400 有两种常见原因，依次降级：
+                // 尺寸问题交给外层换尺寸重试，不要在这里被当成参数问题消化掉
+                if (isUnsupportedSizeError(error) && !isUnsupportedParamError(error)) throw error;
+                // 400 的两种常见原因，依次降级：
                 // 1. 上游不认 response_format（gpt-image 系列、部分中转站）→ 整个字段不发
                 // 2. 上游只支持 url 形式的返回 → 换成 response_format: 'url'
                 if (isUnsupportedParamError(error)) {
@@ -4233,10 +4270,36 @@ const app = createApp({
                         });
                     } catch (retryError) {
                         if (!retryError || retryError.status !== 400) throw retryError;
+                        if (isUnsupportedSizeError(retryError)) throw retryError;
                     }
                 }
+                // 走到这里说明不是参数名问题。只有上游确实拒绝 base64 返回时才换 url，
+                // 其余 400（额度、审核、鉴权、提示词违规等）保留原始错误直接抛出。
+                if (!isUnsupportedFormatError(error)) throw error;
                 return postOpenAIImage(fullPrompt, 'url', signal, '', options);
             }
+        };
+
+        const requestOpenAIImage = async (prompt, options = {}) => {
+            const artists = options.withArtists === false ? '' : getImageGenArtists();
+            const fullPrompt = [prompt, artists].map(part => String(part || '').trim()).filter(Boolean).join(', ');
+            const signal = options.signal;
+            // 调用方显式给了 size 就尊重它（如 ComfyUI），否则按当前档位的降级链依次尝试。
+            // 这样 2K / 4K 能真的发出去，遇到不支持大图的上游也会自动退到它能接受的尺寸。
+            const sizeChain = options.size ? [options.size] : getOpenAIImageSizeChain();
+            for (let index = 0; index < sizeChain.length; index += 1) {
+                const size = sizeChain[index];
+                const isLastCandidate = index === sizeChain.length - 1;
+                try {
+                    return await attemptOpenAIImage(fullPrompt, signal, { ...options, size });
+                } catch (error) {
+                    // 只有「上游嫌尺寸不行」才值得换下一档；额度、审核、鉴权等一律直接抛出
+                    const retryable = error && error.status === 400 && isUnsupportedSizeError(error);
+                    if (!retryable || isLastCandidate) throw error;
+                    showToast(`上游不支持 ${size}，改用 ${sizeChain[index + 1]} 重试`, 'info');
+                }
+            }
+            throw new Error('生图失败：没有可用的尺寸');
         };
 
         const requestComfyImage = async (prompt, options = {}) => {
