@@ -735,6 +735,39 @@ const app = createApp({
             });
         };
 
+        // 聊天输入框的回车发送。
+        //
+        // 原先模板里写的是 @keydown.enter.exact.prevent="sendMessage"，Vue 的 .enter
+        // 修饰符只认 event.key === 'Enter'。桌面物理键盘确实送标准 'Enter'，但 Android
+        // 软键盘（尤其中文输入法）送出的换行键常常是：
+        //   key = 'Unidentified' / keyCode = 229   （IME 尚未确定按键时的占位值）
+        //   key = ''            / keyCode = 13     （部分 WebView 只填 keyCode）
+        // 这两种都匹配不上 .enter，于是 sendMessage 根本没被调用 —— 表现就是套壳 App
+        // 里按回车毫无反应，而网页版正常。
+        //
+        // 这里改成手动识别所有形态，并保留原有语义：
+        //   - Shift/Ctrl/Alt/Meta + 回车 → 不发送，交给浏览器插入换行
+        //   - 输入法组字过程中的回车（isComposing / keyCode 229）→ 只用于确认候选词，不发送
+        const isEnterKeyEvent = (event) => {
+            if (!event) return false;
+            if (event.key === 'Enter' || event.code === 'Enter' || event.code === 'NumpadEnter') return true;
+            // key 缺失或为 IME 占位值时，退回 keyCode/which 判断
+            if (event.key === 'Unidentified' || event.key === '' || event.key === undefined) {
+                return event.keyCode === 13 || event.which === 13;
+            }
+            return false;
+        };
+
+        const handleChatInputKeydown = (event) => {
+            if (!isEnterKeyEvent(event)) return;
+            // 组合键回车＝换行，保持原 .exact 行为
+            if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
+            // 输入法组字中的回车是在确认候选词，不能当成发送，否则中文打字会被截断发出。
+            // keyCode 229 是 IME 组字期的典型值，此时即使 isComposing 未置位也应放过。
+            if (event.isComposing || event.keyCode === 229) return;
+            event.preventDefault();
+            sendMessage();
+        };
         const handleChatInputFocus = () => {
             if (!isMobileViewport()) return;
             clearTimeout(mobileKeyboardBlurTimer);
@@ -11699,7 +11732,7 @@ const app = createApp({
                 showToast(`成功导入 ${normalized.length} 个分片`, 'success');
             }, error => showToast(`导入失败: ${error.message || 'JSON 格式错误'}`, 'error')),
             toggleMobileMenu, closeMobileMenu,
-            fetchModels, selectModel, selectQuickModels, sendMessage, autoResizeInput, handleChatInputFocus, handleChatInputBlur, stopGeneration, clearChat, toggleChatFullscreen,
+            fetchModels, selectModel, selectQuickModels, sendMessage, autoResizeInput, handleChatInputFocus, handleChatInputBlur, handleChatInputKeydown, stopGeneration, clearChat, toggleChatFullscreen,
             handleConfirm, handleCancel, // Export handlers
             copyMessage, playMessageActionFeedback, canDeleteMessage, deleteMessage, regenerateMessage,
             editMessage, saveEditMessage, cancelEditMessage,
