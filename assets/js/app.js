@@ -324,6 +324,11 @@ const app = createApp({
             'vertex_16_9': '16:9'
         };
 
+        // gpt-image / chatgpt-image 系列固定返回 base64，官方明确不接受 response_format，
+        // 带上该字段会被判为未知参数直接 400；只有 dall-e-2/3 需要显式指定。
+        // 中转站的模型名常带厂商前缀（openai/gpt-image-1），先剥掉再匹配。
+        const isGptImageModel = (model) => /^(?:gpt-image|chatgpt-image)/i
+            .test(String(model || '').trim().split('/').pop());
         const getOpenAIImageSize = () => OPENAI_IMAGE_SIZE_MAP[settings.imageSize] || '1024x1024';
         const getAgnesImageSize = () => AGNES_IMAGE_SIZE_MAP[settings.imageSize] || '1024x1024';
         const getVertexImageSize = () => VERTEX_IMAGE_SIZE_MAP[settings.vertexImageSize] || VERTEX_IMAGE_SIZE_MAP.vertex_2_3;
@@ -4100,6 +4105,46 @@ const app = createApp({
             else settings.openaiImageGenModel = value;
         };
 
+        // 不同上游把图片塞在不同位置：官方是 data[0].b64_json，中转站/自建服务
+        // 常见还有 data[0].image / images[0] / 顶层 b64_json，甚至直接给 data:URI。
+        // 逐个兜住，避免明明出图了却报「响应中没有图片数据」。
+        const asImageSrc = (value) => {
+            const raw = String(value || '').trim();
+            if (!raw) return '';
+            if (/^(?:data:|https?:\/\/|blob:)/i.test(raw)) return raw;
+            // 裸 base64：长度足够且只含 base64 字符才认，避免把错误文案当成图片
+            if (raw.length > 128 && /^[A-Za-z0-9+/=\s]+$/.test(raw)) {
+                return `data:image/png;base64,${raw.replace(/\s+/g, '')}`;
+            }
+            return '';
+        };
+
+        const extractImageFromPayload = (payload) => {
+            if (!payload) return '';
+            const direct = asImageSrc(payload);
+            if (direct) return direct;
+            const buckets = [];
+            if (Array.isArray(payload.data)) buckets.push(...payload.data);
+            if (Array.isArray(payload.images)) buckets.push(...payload.images);
+            if (Array.isArray(payload.output)) buckets.push(...payload.output);
+            buckets.push(payload);
+            for (const item of buckets) {
+                if (!item) continue;
+                const plain = asImageSrc(item);
+                if (plain) return plain;
+                const candidates = [
+                    item.b64_json, item.b64Json, item.base64, item.image_base64,
+                    item.url, item.image_url, item.imageUrl, item.image, item.src
+                ];
+                for (const candidate of candidates) {
+                    const hit = asImageSrc(typeof candidate === 'object' && candidate
+                        ? (candidate.url || candidate.b64_json)
+                        : candidate);
+                    if (hit) return hit;
+                }
+            }
+            return '';
+        };
         const postOpenAIImage = async (fullPrompt, responseFormat, signal, style = '', options = {}) => {
             const apiKey = getImageGenKey();
             const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
@@ -4130,9 +4175,13 @@ const app = createApp({
                 requestBody = {
                     prompt: fullPrompt,
                     n: options.image_count || 1,
-                    size: options.size || getOpenAIImageSize(),
-                    response_format: responseFormat
+                    size: options.size || getOpenAIImageSize()
                 };
+                // 只在上游可能真正需要时才发 response_format：gpt-image 系列会因此 400，
+                // 而 omitResponseFormat 是降级重试时显式要求不带该字段。
+                if (!isGptImageModel(imageGenModel) && !options.omitResponseFormat) {
+                    requestBody.response_format = responseFormat;
+                }
                 if (style && (style === 'vivid' || style === 'natural')) {
                     requestBody.style = style;
                 }
@@ -4152,10 +4201,18 @@ const app = createApp({
                 throw error;
             }
             const payload = await response.json();
-            const item = (payload && Array.isArray(payload.data) ? payload.data[0] : null) || {};
-            if (item.b64_json) return `data:image/png;base64,${item.b64_json}`;
-            if (item.url) return item.url;
-            throw new Error('响应中没有图片数据');
+            const image = extractImageFromPayload(payload);
+            if (image) return image;
+            // 上游返回 200 但没有图片时，把原始响应片段带出来，否则无从排查
+            const rawHint = JSON.stringify(payload || {}).slice(0, 200);
+            throw new Error(`响应中没有图片数据：${rawHint}`);
+        };
+
+        // 上游拒绝某个参数时的报错关键词。命中就说明不是内容/额度问题，
+        // 而是请求体本身多带了字段，值得去掉后重试一次。
+        const isUnsupportedParamError = (error) => {
+            const text = `${error && error.message || ''} ${error && error.detail || ''}`.toLowerCase();
+            return /unknown parameter|unsupported parameter|unrecognized|not supported|invalid_request_error|extra fields|response_format/.test(text);
         };
 
         const requestOpenAIImage = async (prompt, options = {}) => {
@@ -4165,10 +4222,20 @@ const app = createApp({
             try {
                 return await postOpenAIImage(fullPrompt, 'b64_json', signal, '', options);
             } catch (error) {
-                if (error && error.status === 400) {
-                    return postOpenAIImage(fullPrompt, 'url', signal, '', options);
+                if (!error || error.status !== 400) throw error;
+                // 400 有两种常见原因，依次降级：
+                // 1. 上游不认 response_format（gpt-image 系列、部分中转站）→ 整个字段不发
+                // 2. 上游只支持 url 形式的返回 → 换成 response_format: 'url'
+                if (isUnsupportedParamError(error)) {
+                    try {
+                        return await postOpenAIImage(fullPrompt, 'b64_json', signal, '', {
+                            ...options, omitResponseFormat: true
+                        });
+                    } catch (retryError) {
+                        if (!retryError || retryError.status !== 400) throw retryError;
+                    }
                 }
-                throw error;
+                return postOpenAIImage(fullPrompt, 'url', signal, '', options);
             }
         };
 
