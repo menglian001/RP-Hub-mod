@@ -1767,6 +1767,20 @@
                 transition-delay: 0s;
             }
 
+            /*
+             * 这里刻意不做「常驻合成层」提升。
+             *
+             * 原本是 contain: layout paint style + will-change: transform
+             * + backface-visibility: hidden 三者叠加，会让 Android WebView 把侧边栏
+             * 永久提升为独立合成层，并按提升那一刻的尺寸做 paint 裁剪。之后展开
+             * 「高级 / 在线」时，面板靠 grid-template-rows: 0fr -> 1fr 在这个层内部
+             * 长高，WebView 不重新光栅化该层，结果整块侧边栏变空白、栏目也点不动。
+             * 套壳 App 独有，桌面与手机浏览器均正常。
+             *
+             * transform 过渡期间浏览器会自行临时提升图层，滑出动画不需要常驻层；
+             * 裁剪由元素自带的 overflow-hidden 负责，去掉 paint containment 不改变
+             * 视觉表现。contain: layout 保留，仍隔离布局计算。
+             */
             .app-sidebar {
                 width: min(18rem, 84vw);
                 max-width: 84vw;
@@ -1775,9 +1789,7 @@
                 transform: translate3d(-104%, 0, 0);
                 transform-origin: left center;
                 transition: transform 0.28s cubic-bezier(0.22, 0.78, 0.25, 1);
-                contain: layout paint style;
-                will-change: transform;
-                backface-visibility: hidden;
+                contain: layout;
                 box-shadow:
                     18px 0 54px -24px rgba(15, 23, 42, 0.45),
                     0 0 0 1px rgba(255, 255, 255, 0.72) inset;
