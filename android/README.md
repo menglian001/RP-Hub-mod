@@ -3,8 +3,8 @@
 把 [RP-Hub](https://github.com/STA1N156/RP-Hub) 网页版打包成 Android 应用，
 内置完整网页内容，支持从远端热更新。
 
-当前已发布：**2.1.0**（versionCode 3，内置内容 v48）
-→ [Releases](https://github.com/menglian001/RP-Hub-mod/releases/tag/v2.1.0)
+当前已发布：**2.2.0**（versionCode 4，内置内容 v65）
+→ [Releases](https://github.com/menglian001/RP-Hub-mod/releases)
 
 ## 快速开始
 
@@ -20,7 +20,7 @@
 | 包名 / applicationId | `cc.salarycat.rphub`（不要改） |
 | 签名证书 SHA-256 | `274017a6cc450d8e2a068a409a61e23e9477a0cdb3a004e953945b340a606725` |
 | key alias | `rphub` |
-| versionCode | 必须大于已发布的 `3` |
+| versionCode | 必须大于已发布的 `4` |
 
 签名私钥 `rphub.keystore` **不在仓库里**，需向持有人索取。
 CI 已配好 4 个签名 Secret，**推 `android/**` 或手动 dispatch 就能直接拿到签名包**，
@@ -169,11 +169,11 @@ API 24~28 直写公共目录并按需申请 `WRITE_EXTERNAL_STORAGE`。
 
 ```json
 {
-  "shellVersion": "2.1.0",
-  "bundledVersion": 48,
+  "shellVersion": "2.2.0",
+  "bundledVersion": 65,
   "activeVersion": 0,
   "stagingVersion": 0,
-  "effectiveVersion": 48,
+  "effectiveVersion": 65,
   "hasActiveContent": false,
   "source": "bundled"
 }
@@ -184,15 +184,15 @@ API 24~28 直写公共目录并按需申请 `WRITE_EXTERNAL_STORAGE`。
 `gradle.properties`：
 
 ```properties
-bundledContentVersion=48    # 必须与 assets/web/version.json 的 versionCode 一致
+bundledContentVersion=65    # 必须与 assets/web/version.json 的 versionCode 一致
 ```
 
 `app/build.gradle.kts`：
 
 ```kotlin
 applicationId = "cc.salarycat.rphub"    // 不要改，改了就无法覆盖安装
-versionCode = 3                          // 每次发版递增
-versionName = "2.1.0"
+versionCode = 4                          // 每次发版递增
+versionName = "2.2.0"
 buildConfigField("String", "UPDATE_BASE_URL", "\"https://rp-hub-mod.pages.dev/\"")
 ```
 
