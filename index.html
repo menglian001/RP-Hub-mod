@@ -2315,8 +2315,20 @@
                 </div>
                 <div v-if="imageLibraryPreview" class="image-library-lightbox" @click.self="imageLibraryPreview = null">
                     <button type="button" class="image-library-lightbox-close" @click="imageLibraryPreview = null">×</button>
-                    <img :src="imageLibraryPreview.src" :alt="imageLibraryPreview.prompt || '生成图片'">
+                    <img :src="imageLibraryPreview.src" :alt="imageLibraryPreview.prompt || '生成图片'"
+                        class="image-library-lightbox-image" :class="{ 'is-saving': savingRoleImage }"
+                        @pointerdown="startImageSavePress($event, imageLibraryPreview)"
+                        @pointermove="moveImageSavePress" @pointerup="clearImageSavePress"
+                        @pointercancel="clearImageSavePress" @pointerleave="clearImageSavePress"
+                        @touchstart="startImageSavePress($event, imageLibraryPreview)"
+                        @touchmove="moveImageSavePress" @touchend="clearImageSavePress"
+                        @touchcancel="clearImageSavePress"
+                        @contextmenu="handleImageSaveContextMenu"
+                        @dragstart.prevent>
                     <p v-if="imageLibraryPreview.prompt" class="image-library-lightbox-caption">{{ imageLibraryPreview.prompt }}</p>
+                    <p class="image-library-lightbox-hint" aria-live="polite">
+                        {{ savingRoleImage ? '正在保存…' : '长按图片保存到本机' }}
+                    </p>
                 </div>
             </div>
 

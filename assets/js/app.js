@@ -2949,6 +2949,150 @@ const app = createApp({
             roleImages.value = images;
         };
 
+        // --- 长按保存图片到本机 ---
+        // App 内 WebView 不响应 <a download>，必须走原生桥 RPHubNative.saveBase64；
+        // 浏览器里回退到 downloadBlob。两条路径都先把图片规整成 data URL。
+        // 必须短于 Android 的 ViewConfiguration.getLongPressTimeout()（默认 500ms）：
+        // 平台长按手势一旦先成立，WebView 会给我们发 pointercancel 清掉定时器，
+        // 保存就永远不触发。留 100ms 余量。
+        const IMAGE_SAVE_PRESS_MS = 400;
+        const IMAGE_SAVE_MOVE_TOLERANCE_PX = 10;
+
+        const savingRoleImage = ref(false);
+        let imageSavePressTimer = null;
+        let imageSavePressOrigin = null;
+        // 长按触发保存后浏览器仍会补一个 contextmenu，需要吞掉这一次
+        let suppressNextImageContextMenu = false;
+        // Pointer Events 要 Chrome 55+。minSdk 24 的设备若 WebView 从未更新
+        // 就只有 touch 事件，两套都听；谁先到就认谁，另一套本轮忽略。
+        let imageSavePressSource = '';
+
+        const buildRoleImageFileName = (image) => {
+            const roleName = String(imageLibraryCharacter.value?.name || 'RPHub')
+                .replace(/[\\/:*?"<>|]/g, '_')
+                .replace(/\s+/g, '_')
+                .slice(0, 40) || 'RPHub';
+            const stamp = new Date(Number(image?.createdAt) || Date.now())
+                .toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            return `${roleName}_${stamp}.png`;
+        };
+
+        // 远程图直接 fetch 成 blob，失败（跨域无 CORS 头）再退到 canvas 重绘。
+        // canvas 路径对无 CORS 头的图会被污染而抛错，所以只作为兜底。
+        const roleImageToBlob = async (src) => {
+            if (/^data:/i.test(src)) {
+                const response = await fetch(src);
+                return await response.blob();
+            }
+            try {
+                const response = await fetch(src, { mode: 'cors', credentials: 'omit' });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const blob = await response.blob();
+                if (blob.size) return blob;
+                throw new Error('图片内容为空');
+            } catch (fetchError) {
+                const bytes = await cardUtils.imageUrlToPngBytes(src, { crossOrigin: 'anonymous' });
+                return new Blob([bytes], { type: 'image/png' });
+            }
+        };
+
+        const saveRoleImageToDevice = async (image) => {
+            const src = String(image?.src || '');
+            if (!src) { showToast('这张图片没有可保存的内容', 'error'); return; }
+            if (savingRoleImage.value) return;
+
+            savingRoleImage.value = true;
+            try {
+                const blob = await roleImageToBlob(src);
+                const fileName = buildRoleImageFileName(image);
+                const native = window.RPHubNative;
+
+                if (native && typeof native.saveBase64 === 'function') {
+                    const dataUrl = await cardUtils.blobToDataUrl(blob);
+                    // 旧版壳的 saveBase64 返回 void，只有新壳会回 JSON；
+                    // 拿不到结构化结果时以原生自己的 toast 为准，不再重复提示。
+                    const raw = native.saveBase64(fileName, blob.type || 'image/png', dataUrl);
+                    let parsed = null;
+                    try { parsed = raw ? JSON.parse(raw) : null; } catch (e) { parsed = null; }
+                    if (parsed && parsed.ok === false) {
+                        showToast(`保存失败：${parsed.error || '未知错误'}`, 'error');
+                    }
+                    return;
+                }
+
+                cardUtils.downloadBlob(blob, fileName, { revokeDelay: 2000 });
+                showToast('图片已保存', 'success');
+            } catch (error) {
+                showToast(`保存失败：${error?.message || '无法读取图片'}`, 'error');
+            } finally {
+                savingRoleImage.value = false;
+            }
+        };
+
+        const clearImageSavePress = () => {
+            if (imageSavePressTimer) {
+                clearTimeout(imageSavePressTimer);
+                imageSavePressTimer = null;
+            }
+            imageSavePressOrigin = null;
+            imageSavePressSource = '';
+        };
+
+        // pointer 与 touch 事件取坐标的方式不同，统一成 {x, y}；多指直接放弃
+        const imageSavePressPoint = (event) => {
+            if (event.touches) {
+                if (event.touches.length > 1) return null;
+                const touch = event.touches[0] || event.changedTouches?.[0];
+                return touch ? { x: touch.clientX, y: touch.clientY } : null;
+            }
+            return { x: event.clientX, y: event.clientY };
+        };
+
+        const startImageSavePress = (event, image) => {
+            // 只认主键，鼠标右键/中键不触发保存
+            if (event.pointerType === 'mouse' && event.button !== 0) return;
+            if (!image?.src) return;
+            const source = event.touches ? 'touch' : 'pointer';
+            // 同一次按压两套事件都会来，先到的那套说话
+            if (imageSavePressTimer && imageSavePressSource !== source) return;
+            const point = imageSavePressPoint(event);
+            if (!point) { clearImageSavePress(); return; }
+
+            clearImageSavePress();
+            imageSavePressSource = source;
+            imageSavePressOrigin = point;
+            imageSavePressTimer = setTimeout(() => {
+                imageSavePressTimer = null;
+                imageSavePressOrigin = null;
+                imageSavePressSource = '';
+                suppressNextImageContextMenu = true;
+                saveRoleImageToDevice(image);
+            }, IMAGE_SAVE_PRESS_MS);
+        };
+
+        // 手指划动说明用户在滚动/拖拽，不是长按
+        const moveImageSavePress = (event) => {
+            if (!imageSavePressOrigin) return;
+            const point = imageSavePressPoint(event);
+            if (!point) { clearImageSavePress(); return; }
+            const dx = Math.abs(point.x - imageSavePressOrigin.x);
+            const dy = Math.abs(point.y - imageSavePressOrigin.y);
+            if (dx > IMAGE_SAVE_MOVE_TOLERANCE_PX || dy > IMAGE_SAVE_MOVE_TOLERANCE_PX) {
+                clearImageSavePress();
+            }
+        };
+
+        const handleImageSaveContextMenu = (event) => {
+            // 长按已经触发过保存：只吞掉这一次系统菜单，之后恢复默认行为，
+            // 桌面右键仍然可以用浏览器自带的「图片另存为」
+            if (suppressNextImageContextMenu) {
+                suppressNextImageContextMenu = false;
+                event.preventDefault();
+            }
+            clearImageSavePress();
+        };
+        // --- End 长按保存 ---
+
         watch(currentView, (newView) => {
             if (newView === 'images') loadCurrentRoleImages();
         });
@@ -11565,6 +11709,8 @@ const app = createApp({
             roleImages, imageLibraryRoleUuid, imageLibraryCategory, imageLibrarySearch, imageLibraryPreview,
             imageLibraryCharacter, filteredRoleImages, openImageLibraryCharacter, closeImageLibraryCharacter,
             setImageLibraryCategory, deleteRoleImage, toggleRoleImageFavorite, loadCurrentRoleImages,
+            savingRoleImage, saveRoleImageToDevice,
+            startImageSavePress, moveImageSavePress, clearImageSavePress, handleImageSaveContextMenu,
             vertexImageSizeOptions,
             announcementDialog, dismissAnnouncement, // 公告系统
             // --- End Mod Features Exports ---

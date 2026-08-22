@@ -29,5 +29,9 @@
 .image-library-lightbox img { max-width: min(92vw, 70rem); max-height: 78vh; border-radius: 1rem; object-fit: contain; box-shadow: 0 24px 80px rgba(0,0,0,.45); }
 .image-library-lightbox-close { position: absolute; top: 1rem; right: 1rem; width: 2.5rem; height: 2.5rem; border-radius: 9999px; background: rgba(255,255,255,.16); color: #fff; font-size: 1.75rem; line-height: 1; }
 .image-library-lightbox-caption { max-width: min(90vw, 56rem); color: rgba(255,255,255,.82); font-size: .8rem; text-align: center; }
+/* 长按保存：压掉系统的长按选择/拖拽气泡，否则移动端长按先弹出系统菜单 */
+.image-library-lightbox-image { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; -webkit-user-drag: none; touch-action: pan-y; transition: opacity .18s ease; }
+.image-library-lightbox-image.is-saving { opacity: .55; }
+.image-library-lightbox-hint { color: rgba(255,255,255,.62); font-size: .72rem; letter-spacing: .02em; text-align: center; }
 @media (min-width: 768px) { .image-library-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (prefers-reduced-motion: reduce) { .image-library-thumb img { transition: none; } }
