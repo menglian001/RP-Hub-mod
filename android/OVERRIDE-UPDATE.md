@@ -3,7 +3,7 @@
 本文件记录让新版本 APK 能**直接覆盖安装**所需的全部信息。
 换电脑、换构建环境、换人接手、隔很久再来更新，照这份文档做就不会踩坑。
 
-> 最后核对时间：2026-08-22，对应已发布版本 **2.2.0（versionCode 4，内置内容 v65）**。
+> 最后核对时间：2026-08-22，对应已发布版本 **2.2.1（versionCode 5，内置内容 v67）**。
 > 文中所有指纹、版本号、路径、URL 均为实测值，不是抄来的模板。
 
 ---
@@ -15,7 +15,7 @@
 1. **包名** `cc.salarycat.rphub` —— 不要改。
 2. **签名证书** SHA-256 = `274017a6cc450d8e2a068a409a61e23e9477a0cdb3a004e953945b340a606725`
    —— 必须用同一个 `rphub.keystore`，这个文件**不在仓库里**，需要向持有人索取。
-3. **versionCode** 比 `4` 大 —— 改 `android/app/build.gradle.kts`。
+3. **versionCode** 比 `5` 大 —— 改 `android/app/build.gradle.kts`。
 
 其余步骤见第六节。没有 keystore 就做不出可覆盖的包，这是硬约束，没有绕过办法。
 
@@ -28,8 +28,8 @@
 | keystore 文件 | `android/rphub.keystore`（不入库） | 向持有人索取 |
 | key alias | `rphub` | keystore 内 |
 | 证书 SHA-256 | `274017a6cc450d8e2a068a409a61e23e9477a0cdb3a004e953945b340a606725` | keystore 内 |
-| 已发布 versionCode | `4`（versionName `2.2.0`） | `app/build.gradle.kts` |
-| 已发布内置内容版本 | `65` | `gradle.properties` + `assets/web/version.json` |
+| 已发布 versionCode | `5`（versionName `2.2.1`） | `app/build.gradle.kts` |
+| 已发布内置内容版本 | `67` | `gradle.properties` + `assets/web/version.json` |
 | 热更新基址 | `https://rp-hub-mod.pages.dev/` | `app/build.gradle.kts` 的 `UPDATE_BASE_URL` |
 | minSdk / targetSdk / compileSdk | 24 / 34 / 34 | `app/build.gradle.kts` |
 
@@ -43,7 +43,7 @@ Android 允许新 APK 覆盖旧 APK，必须**同时**满足：
 |---|---|---|---|
 | 包名相同 | `cc.salarycat.rphub` | `app/build.gradle.kts` 的 `applicationId` 与 `namespace` | **永远不要改** |
 | 签名证书相同 | SHA-256 `274017a6...` | `rphub.keystore` | 必须是同一个 keystore 里的同一个 alias |
-| versionCode 不降低 | 当前 `4` | `app/build.gradle.kts` 的 `versionCode` | 每次发版必须递增 |
+| versionCode 不降低 | 当前 `5` | `app/build.gradle.kts` 的 `versionCode` | 每次发版必须递增 |
 
 任意一条不满足，安装时会报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`，
 手机上表现为「应用未安装」，用户只能卸载重装（丢失全部本地数据：
@@ -299,7 +299,7 @@ bash sync-web.sh
 
 ```properties
 # gradle.properties，当前值
-bundledContentVersion=65
+bundledContentVersion=67
 ```
 
 不一致会导致壳误判内置内容比线上新或旧，热更新逻辑出错。
@@ -310,8 +310,8 @@ bundledContentVersion=65
 `app/build.gradle.kts`：
 
 ```kotlin
-versionCode = 5          // 必须比上一版大，当前已发布的是 4
-versionName = "2.2.1"    // 展示用，随意
+versionCode = 6          // 必须比上一版大，当前已发布的是 5
+versionName = "2.2.2"    // 展示用，随意
 ```
 
 **versionCode 忘记递增，覆盖安装会失败。**
@@ -329,7 +329,7 @@ BT=$ANDROID_HOME/build-tools/34.0.0
 
 # 包名 / versionCode / versionName 一次看全
 "$BT/aapt2" dump badging "$APK" | head -1
-# → package: name='cc.salarycat.rphub' versionCode='4' versionName='2.2.0' ...
+# → package: name='cc.salarycat.rphub' versionCode='5' versionName='2.2.1' ...
 
 # 内置网页内容与版本号
 unzip -l "$APK" | grep "assets/web/novel/index.html"
@@ -380,8 +380,15 @@ gh release create v2.1.1 \
 | 1.0.0（早期二改壳） | 1 | 1.0.0 | ≤ v37 | `53756ef1` | **不能**，签名不同 |
 | 2.0.0（首个自签版本） | 2 | 2.0.0 | v43 | `274017a6` | — |
 | 2.1.0 | 3 | 2.1.0 | v48 | `274017a6` | 能 |
-| 2.2.0（当前已发布） | 4 | 2.2.0 | v65 | `274017a6` | 能 |
-| 以后每一版 | 5+ | 随意 | 递增 | `274017a6` | 能 |
+| 2.2.0 | 4 | 2.2.0 | v65 | `274017a6` | 能 |
+| 2.2.1（当前已发布） | 5 | 2.2.1 | v67 | `274017a6` | 能 |
+| 以后每一版 | 6+ | 随意 | 递增 | `274017a6` | 能 |
+
+2.2.1 的改动内容：图片管理的放大图上加了明确的「保存到本机」按钮（长按保留为快捷方式）；
+修复壳的内容加载优先级 —— 旧版 `hasActiveContent()` 不比较版本，
+导致热更新过的机器装上带新功能的新壳后仍加载陈旧的 active 内容，网页改动永远不可见。
+2.2.0 就是这么翻车的：热更到 v59 的机器压住了内置 v65。
+现在 active 旧于内置内容时会被丢弃并改用内置内容。
 
 2.2.0 的改动内容：图片管理支持长按预览图保存到本机；
 原生 `saveBase64` 改用 MediaStore 写入，修复 Android 10+ 分区存储下必然失败的落盘缺陷
