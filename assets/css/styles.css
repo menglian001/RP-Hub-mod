@@ -1469,6 +1469,14 @@
             position: relative;
         }
 
+        /* 长按保存：压掉系统的长按选择与拖拽气泡 */
+        .generated-image-card img {
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+
         .generated-image-reroll {
             position: absolute;
             right: 0.65rem;

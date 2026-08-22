@@ -2967,8 +2967,8 @@ const app = createApp({
         // 就只有 touch 事件，两套都听；谁先到就认谁，另一套本轮忽略。
         let imageSavePressSource = '';
 
-        const buildRoleImageFileName = (image) => {
-            const roleName = String(imageLibraryCharacter.value?.name || 'RPHub')
+        const buildRoleImageFileName = (image, roleNameHint) => {
+            const roleName = String(roleNameHint || imageLibraryCharacter.value?.name || 'RPHub')
                 .replace(/[\\/:*?"<>|]/g, '_')
                 .replace(/\s+/g, '_')
                 .slice(0, 40) || 'RPHub';
@@ -2996,7 +2996,7 @@ const app = createApp({
             }
         };
 
-        const saveRoleImageToDevice = async (image) => {
+        const saveRoleImageToDevice = async (image, roleNameHint) => {
             const src = String(image?.src || '');
             if (!src) { showToast('这张图片没有可保存的内容', 'error'); return; }
             if (savingRoleImage.value) return;
@@ -3004,7 +3004,7 @@ const app = createApp({
             savingRoleImage.value = true;
             try {
                 const blob = await roleImageToBlob(src);
-                const fileName = buildRoleImageFileName(image);
+                const fileName = buildRoleImageFileName(image, roleNameHint);
                 const native = window.RPHubNative;
 
                 if (native && typeof native.saveBase64 === 'function') {
@@ -3048,7 +3048,7 @@ const app = createApp({
             return { x: event.clientX, y: event.clientY };
         };
 
-        const startImageSavePress = (event, image) => {
+        const startImageSavePress = (event, image, roleNameHint) => {
             // 只认主键，鼠标右键/中键不触发保存
             if (event.pointerType === 'mouse' && event.button !== 0) return;
             if (!image?.src) return;
@@ -3066,7 +3066,7 @@ const app = createApp({
                 imageSavePressOrigin = null;
                 imageSavePressSource = '';
                 suppressNextImageContextMenu = true;
-                saveRoleImageToDevice(image);
+                saveRoleImageToDevice(image, roleNameHint);
             }, IMAGE_SAVE_PRESS_MS);
         };
 
@@ -3080,6 +3080,51 @@ const app = createApp({
             if (dx > IMAGE_SAVE_MOVE_TOLERANCE_PX || dy > IMAGE_SAVE_MOVE_TOLERANCE_PX) {
                 clearImageSavePress();
             }
+        };
+
+        // 聊天里的生成图是 markdown 渲染出的裸 DOM（.generated-image-card），
+        // 不经 Vue 模板，只能在 document 上做事件委托。
+        // 仍在生成中（is-generating / 无 src）的卡片不响应长按。
+        const resolveChatImageTarget = (event) => {
+            const img = event.target?.closest?.('.generated-image-card img');
+            if (!img) return null;
+            const card = img.closest('.generated-image-card');
+            if (!card || card.classList.contains('is-generating')) return null;
+            const src = img.currentSrc || img.getAttribute('src') || '';
+            if (!src || /^data:image\/svg/i.test(src)) return null;
+            return {
+                src,
+                prompt: card.dataset.imagegenPrompt || '',
+                createdAt: Date.now(),
+            };
+        };
+
+        const startChatImageSavePress = (event) => {
+            const image = resolveChatImageTarget(event);
+            if (!image) return;
+            startImageSavePress(event, image, currentCharacter.value?.name);
+        };
+
+        let chatImageSavePressBound = false;
+        const bindChatImageSavePress = () => {
+            // 生图观察器可能被反复启动，事件只绑一次
+            if (chatImageSavePressBound) return;
+            chatImageSavePressBound = true;
+            // passive:true —— 只做计时，不 preventDefault，滚动性能不受影响
+            document.addEventListener('pointerdown', startChatImageSavePress, { passive: true });
+            document.addEventListener('pointermove', moveImageSavePress, { passive: true });
+            document.addEventListener('pointerup', clearImageSavePress, { passive: true });
+            document.addEventListener('pointercancel', clearImageSavePress, { passive: true });
+            // 老 WebView 没有 Pointer Events，补一套 touch
+            document.addEventListener('touchstart', startChatImageSavePress, { passive: true });
+            document.addEventListener('touchmove', moveImageSavePress, { passive: true });
+            document.addEventListener('touchend', clearImageSavePress, { passive: true });
+            document.addEventListener('touchcancel', clearImageSavePress, { passive: true });
+            // 长按成功后要吞掉系统菜单，这个必须可 preventDefault，不能 passive
+            document.addEventListener('contextmenu', (event) => {
+                if (!event.target?.closest?.('.generated-image-card img')) return;
+                handleImageSaveContextMenu(event);
+            });
         };
 
         const handleImageSaveContextMenu = (event) => {
@@ -4979,6 +5024,7 @@ const app = createApp({
         let imageGenObserver = null;
         const startImageGenObserver = () => {
             if (imageGenObserver || typeof MutationObserver === 'undefined') return;
+            bindChatImageSavePress();
             imageGenObserver = new MutationObserver(records => {
                 records.forEach(record => record.addedNodes.forEach(scanImageGenPlaceholders));
             });
