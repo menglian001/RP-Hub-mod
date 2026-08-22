@@ -5,6 +5,16 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+      仅用于「图片管理里长按预览图保存到本机」。
+      API 29+ 走 MediaStore 写入，不需要任何存储权限；
+      只有 API 24~28（分区存储之前）才需要直写公共目录，因此限制 maxSdkVersion。
+    -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
