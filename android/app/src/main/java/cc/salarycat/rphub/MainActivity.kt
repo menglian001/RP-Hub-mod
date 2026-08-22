@@ -80,6 +80,10 @@ class MainActivity : AppCompatActivity() {
         // 关键：在 WebView 加载之前完成提升，首屏就是新内容。
         // 旧壳把提升放在弹窗回调里，弹窗不出现就永远卡住。
         try {
+            // 先丢弃旧于内置内容的 active，否则装了新壳也会继续加载陈旧网页
+            if (ContentManager.discardStaleActive(applicationContext)) {
+                Log.i(TAG, "启动时已丢弃陈旧的热更新内容")
+            }
             if (ContentManager.promoteIfPending(applicationContext)) {
                 Log.i(TAG, "启动时已提升待用内容")
             }

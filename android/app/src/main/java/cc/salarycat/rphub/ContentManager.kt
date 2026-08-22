@@ -54,9 +54,36 @@ object ContentManager {
     fun effectiveVersion(ctx: Context): Int =
         maxOf(activeVersion(ctx), BuildConfig.BUNDLED_CONTENT_VERSION)
 
-    /** active 目录是否有可用内容。 */
+    /**
+     * active 目录是否有可用内容。
+     *
+     * 除了文件存在，还必须**不旧于 APK 内置内容**。
+     * 少了这个版本比较，热更新过的用户装上带新功能的新壳后，
+     * WebView 会继续加载陈旧的 active 内容，新壳里的网页改动永远不可见 ——
+     * 2.2.0 就是这么翻车的：热更到 v59 的机器压住了内置 v65。
+     */
     fun hasActiveContent(ctx: Context): Boolean =
-        activeVersion(ctx) > 0 && File(activeDir(ctx), "index.html").isFile
+        activeVersion(ctx) > 0 &&
+            activeVersion(ctx) >= BuildConfig.BUNDLED_CONTENT_VERSION &&
+            File(activeDir(ctx), "index.html").isFile
+
+    /**
+     * 启动时调用：若 active 比 APK 内置内容旧，直接丢弃。
+     *
+     * 只靠 [hasActiveContent] 判断也能让 WebView 回退到内置内容，
+     * 但那份陈旧目录会一直占着空间，且下次 checkAndDownload 比对
+     * effectiveVersion 时仍是干扰项，索引清掉更干净。
+     */
+    fun discardStaleActive(ctx: Context): Boolean {
+        val active = activeVersion(ctx)
+        if (active <= 0) return false
+        if (active >= BuildConfig.BUNDLED_CONTENT_VERSION) return false
+
+        Log.i(TAG, "active v$active 旧于内置 v${BuildConfig.BUNDLED_CONTENT_VERSION}，丢弃并改用内置内容")
+        activeDir(ctx).deleteRecursively()
+        prefs(ctx).edit().remove(KEY_ACTIVE_VERSION).apply()
+        return true
+    }
 
     /**
      * 启动时调用：若 staging 中存在比 active 更新的内容，立即提升。
@@ -74,8 +101,10 @@ object ContentManager {
             return false
         }
 
-        if (staged <= activeVersion(ctx)) {
-            Log.i(TAG, "staging v$staged 不新于 active v${activeVersion(ctx)}，丢弃")
+        // 与 effectiveVersion 比较，而不是只比 active：
+        // 新壳内置内容可能已经比这个待提升包更新，提升上去反而是退版。
+        if (staged <= effectiveVersion(ctx)) {
+            Log.i(TAG, "staging v$staged 不新于当前 v${effectiveVersion(ctx)}，丢弃")
             staging.deleteRecursively()
             prefs(ctx).edit().remove(KEY_STAGING_VERSION).apply()
             return false
