@@ -33,5 +33,12 @@
 .image-library-lightbox-image { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; -webkit-user-drag: none; touch-action: pan-y; transition: opacity .18s ease; }
 .image-library-lightbox-image.is-saving { opacity: .55; }
 .image-library-lightbox-hint { color: rgba(255,255,255,.62); font-size: .72rem; letter-spacing: .02em; text-align: center; }
+/* 保存按钮：长按不够直观，给一个明确入口 */
+.image-library-lightbox-actions { display: flex; gap: .6rem; align-items: center; justify-content: center; flex-wrap: wrap; }
+.image-library-save-button { display: inline-flex; align-items: center; gap: .45rem; padding: .55rem 1.15rem; border: 1px solid rgba(255,255,255,.28); border-radius: 9999px; background: rgba(255,255,255,.14); color: #fff; font-size: .85rem; font-weight: 600; transition: background .18s ease, opacity .18s ease; }
+.image-library-save-button:hover:not(:disabled) { background: rgba(255,255,255,.24); }
+.image-library-save-button:active:not(:disabled) { background: rgba(255,255,255,.32); }
+.image-library-save-button:disabled { opacity: .6; }
+.image-library-save-icon { width: 1.05rem; height: 1.05rem; }
 @media (min-width: 768px) { .image-library-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (prefers-reduced-motion: reduce) { .image-library-thumb img { transition: none; } }
