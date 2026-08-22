@@ -31,11 +31,15 @@
 | `INTERNET` | 是 | 请求 AI API、检查和下载热更新、加载用户主动打开的外链 | 对话内容和 API Key 会发送给用户配置的 API 服务 |
 | `ACCESS_NETWORK_STATE` | 是 | 判断网络是否可用 | 不读取用户内容 |
 | `POST_NOTIFICATIONS` | 是 | 预留通知能力 | 当前壳没有主动发通知逻辑；用户可在系统设置关闭 |
+| `WRITE_EXTERNAL_STORAGE` | 仅 API ≤ 28 | 保存图片到相册/下载目录（`maxSdkVersion=28`） | 只写本应用导出的文件，不读取用户文件 |
 | 相机、麦克风、定位、通讯录 | 否 | 不使用 | 不读取 |
-| 读写全盘存储权限 | 否 | 不申请 | 不扫描用户文件 |
+| 读取存储 / 全盘管理存储 | 否 | 不申请 | 不扫描用户文件 |
 
 文件导入使用系统文件选择器：用户主动选择的 URI 才会被网页读取。
-文件导出仅把用户在网页中主动导出的内容写到公开 `Downloads/RPHub/` 目录。
+文件导出仅把用户在网页中主动导出的内容写到公开目录：
+图片进相册 `Pictures/RPHub/`，其他文件进 `Download/RPHub/`。
+API 29+ 通过 MediaStore 写入，不需要任何存储权限；
+只有 API 24~28 才需要 `WRITE_EXTERNAL_STORAGE`，且首次保存时才申请。
 
 ---
 
@@ -62,7 +66,9 @@
 - `shellVersion()`、`shellVersionCode()`、`contentVersion()`、`contentInfo()`：版本和诊断信息
 - `checkUpdate()`、`applyPendingUpdate()`：检查和应用热更新
 - `getAnnouncement()`：返回空对象
-- `saveBase64(name, mime, dataUrl)`：将网页主动导出的内容写入下载目录
+- `saveBase64(name, mime, dataUrl)`：把网页主动导出的内容写入相册或下载目录。
+  只接受网页传来的 data URL，壳不会主动读取本机文件；文件名经过清洗
+  （去掉路径分隔符、前导点与超长部分），无法穿越到目录外。
 
 **新增原生桥接方法前必须审查。** `addJavascriptInterface` 会让网页 JavaScript 调用原生代码；
 热更新网页或被嵌入的第三方脚本一旦不可信，不应新增能读文件、执行命令、访问敏感权限或发送隐私数据的方法。

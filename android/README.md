@@ -125,7 +125,15 @@ assets/web/         APK 内置内容
 | `contentInfo()` | String (JSON) | 全部诊断信息，排查用 |
 | `checkUpdate()` | void | 手动触发检查更新 |
 | `applyPendingUpdate()` | Boolean | 立即提升已下载内容并刷新 |
-| `saveBase64(name, mime, dataUrl)` | void | 保存文件到下载目录 |
+| `saveBase64(name, mime, dataUrl)` | String (JSON) | 保存文件到相册/下载目录 |
+
+`saveBase64` 按 MIME 分流：`image/*` 存到相册 `Pictures/RPHub`，
+其余存到 `Download/RPHub`。API 29+ 走 MediaStore（不需要存储权限），
+API 24~28 直写公共目录并按需申请 `WRITE_EXTERNAL_STORAGE`。
+返回 `{"ok":true,"name":"实际文件名"}` 或 `{"ok":false,"error":"..."}`；
+2.1.0 及更早的旧壳此方法返回 void 且只会写 `Download/RPHub`（在 Android 10+
+的分区存储下实际会失败），网页侧已兼容拿不到返回值的情况。
+**要让保存真正可用，必须重新打包一版壳**（仅热更新网页内容不够）。
 
 ### 反向接口：返回键交给网页处理
 
