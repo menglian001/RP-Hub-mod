@@ -136,13 +136,18 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
             const returnLabel = webTool ? `${count}条联网搜索结果，或网页正文` : (keywordTool ? `${count}条对话片段` : `${count}条向量记忆`);
             const descriptionFallback = webTool
                 ? '通过 Tavily 联网搜索外部网页资料，返回带来源链接的搜索结果；当调用内容是网页链接时，读取该网页正文。'
-                : '按关键词精确匹配当前对话历史，抓取包含关键词的原文片段。';
+                : keywordTool
+                    ? '按关键词精确匹配当前对话历史，抓取包含关键词的原文片段。'
+                    : '按调用内容检索长期向量记忆。';
             const rules = webTool ? [
                 '用途：查外部网页、最新信息、冷门资料或本地资料无法确认的内容。',
                 `搜索：<${addCallName}:具体搜索词> 返回标题、链接和摘要；读取网页：<${addCallName}:https://...> 返回正文。不要编造链接，也不要自动读取全部链接。`
-            ] : [
+            ] : keywordTool ? [
                 '用途：精确查当前对话历史里的原文、名称、台词、物品、地点、设定词或前文细节。',
                 '关键词尽量使用原文可能出现的词；同一信息点的同义词或别名可以放在同一次查询。'
+            ] : [
+                '用途：检索长期记忆、旧剧情、历史设定、关系、人物状态、物品来历或用户暗指内容。',
+                '检索词优先包含人物、事件、物品、地点、时间线和关键状态。'
             ];
             return [
                 '<tool',
@@ -354,6 +359,17 @@ image###英文Tag###
                 searchDepth: 'advanced'
             }),
             defaults: Object.freeze([
+                Object.freeze({
+                    id: 'tool_memory',
+                    name: '向量记忆主动检索',
+                    enabled: false,
+                    type: 'vector_memory',
+                    callName: 'tool_memory',
+                    resultCount: 5,
+                    resultCountVersion: 4,
+                    description: '当需要长期记忆、旧剧情、历史设定、过往关系、人物状态、物品来历或用户暗指内容时，单独输出 <tool_memory_add:检索内容> 或 <tool_memory_cover:检索内容>。每行一个标签，单次回复最多 5 个工具标签，不写说明或 COT；多个独立信息点拆开查，优先最关键的信息点，检索词要具体，优先人物、事件、物品、地点和时间线。没有当前上下文或检索结果支持的设定、关系、状态和事件不要编造。本轮第一次检索一律用 add；看到工具结果后，若是补充不同证据且旧结果有用就 add；若旧结果偏题、太宽、重复、方向错误、噪声过多，或更具体检索能替代旧结果，应优先用 cover 清理上下文冗余，把注意力集中在更准确的记忆上。结果足够就继续正文，不够就换更具体的问题继续查。',
+                    displayDescription: '让角色在上下文信息不够明确时，主动检索向量记忆，适合找旧剧情、历史设定、人物关系、物品来历和用户暗指过的内容。'
+                }),
                 Object.freeze({
                     id: 'tool_grep',
                     name: '关键词检索',

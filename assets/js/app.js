@@ -6175,7 +6175,7 @@ const app = createApp({
         };
 
         const getActiveToolCallLabels = (tool) => {
-            const baseCallName = normalizeActiveToolBaseCallName(tool?.callName || 'tool_grep');
+            const baseCallName = normalizeActiveToolBaseCallName(tool?.callName || 'tool_memory');
             return {
                 add: `${baseCallName}_add`,
                 cover: `${baseCallName}_cover`
@@ -8585,27 +8585,28 @@ const app = createApp({
             if (!Array.isArray(results) || results.length === 0) {
                 return [
                     `<active_tool_result name="${title}" call="${callName}" mode="${modeValue}" query="${escapeXmlAttribute(cleanQuery)}" status="empty">`,
-                    `  <description>本次关键词检索没有检索成功，没有找到包含该关键词的对话片段，也没有提供可作为答案依据的新证据。${modeDescription}本段内容已插入最后一条用户消息结尾。请换更贴近原文的关键词再次调用，不要编造未出现过的对话内容。</description>`,
+                    `  <description>本次向量记忆没有检索成功，没有找到可用记忆片段，也没有提供可作为答案依据的新证据。${modeDescription}本段内容已插入最后一条用户消息结尾。请先判断当前上下文是否已经明确且足够；如果仍不够明确完整，请换更具体的检索内容再次调用，不要重复完全相同的查询。</description>`,
                     '</active_tool_result>'
                 ].join('\n');
             }
 
-            const formattedResults = results.map(item => {
-                const turnValue = escapeXmlAttribute(item.turn || '?');
-                const roleValue = escapeXmlAttribute(item.role || 'unknown');
-                const speakerValue = escapeXmlAttribute(item.speaker || '');
-                const matchedValue = escapeXmlAttribute((item.matchedTerms || []).join(', '));
-                const fragmentText = indentXmlText(item.dialogueText || '', 4);
+            const formattedResults = sortVectorMemoriesByTime(results).map(memory => {
+                const turnValue = escapeXmlAttribute(memory.turn || '?');
+                const scoreValue = escapeXmlAttribute(Number.isFinite(memory.vectorScore)
+                    ? `${(memory.vectorScore * 100).toFixed(1)}%`
+                    : 'unknown');
+                const storyTimeValue = escapeXmlAttribute(memory.storyTime || '');
+                const fragmentText = indentXmlText(memory.paragraph || memory.summary || memory.sourceText || '', 4);
                 return [
-                    `  <dialogue_fragment turn="${turnValue}" role="${roleValue}" speaker="${speakerValue}" matched="${matchedValue}">`,
+                    `  <memory_fragment turn="${turnValue}" similarity="${scoreValue}" story_time="${storyTimeValue}">`,
                     fragmentText,
-                    '  </dialogue_fragment>'
+                    '  </memory_fragment>'
                 ].join('\n');
             }).join('\n\n');
 
             return [
                 `<active_tool_result name="${title}" call="${callName}" mode="${modeValue}" query="${escapeXmlAttribute(cleanQuery)}">`,
-                `  <description>以下是系统根据关键词从当前对话历史中精确抓取到的原文片段。${modeDescription}本段内容由系统插入最后一条用户消息结尾。请优先依据这些原文片段继续回答，不要把没有出现过的内容说成事实；如果仍不足以明确回答，请换更贴近原文的关键词继续调用工具。</description>`,
+                `  <description>以下是系统根据上一条正文工具调用检索到的向量记忆。${modeDescription}本段内容由系统插入最后一条用户消息结尾。请用这些结果继续回答用户，不要复述工具调用标签，也不要把这些内容当作当前现场；如果结果仍不足以明确回答，或仍有疑点，请换更具体的检索内容继续调用工具。</description>`,
                 formattedResults,
                 '</active_tool_result>'
             ].join('\n');
