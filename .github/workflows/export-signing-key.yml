@@ -1,0 +1,107 @@
+name: Export signing key (one-shot)
+
+# 一次性用途：把仓库 Secrets 里的签名 keystore 与三个密码取回本地。
+#
+# 为什么需要它：GitHub Secrets 是单向的，存进去就读不回来，连仓库 owner
+# 也不行。但 workflow 运行时能拿到 secret 值 —— build-apk.yml 一直靠这个
+# 把 keystore 解码出来签名。这里复用同一条通路，只是把解出来的内容
+# 加密后作为 artifact 带回来。
+#
+# 安全设计：
+#   - 只能手动触发（workflow_dispatch），不会因为 push 自己跑
+#   - 产物用 RSA-4096 公钥做混合加密（AES-256 加密内容 + RSA-OAEP 加密会话密钥）
+#     公开仓库的 artifact 任何登录用户都能下载，所以绝不能放明文
+#   - 对应私钥只在本地，不进仓库、不进 secret、不进日志
+#   - 全程不 echo 任何 secret 值；解码与加密都在文件之间进行
+#   - 用完请立刻删除这个文件，别把一个能导出 secret 的 workflow 留在仓库里
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 写入接收方公钥
+        run: |
+          mkdir -p out
+          cat > recipient.pem <<'PEMEOF'
+          -----BEGIN PUBLIC KEY-----
+          MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAwiAw5DNxOp7KKef82GsA
+          RUzzfqUoz9CKt8OS2AXlj5kio0pjRGdHnybuA0bs7nTMYraSg/ecoWIQGy4TcAMh
+          +sJrKrCD9rKJAH4tR/8fNZTWlZTlL4wyxRodrN8bJRaX2TOHz55rosWIPPbVklRh
+          nGf/WsXeGYcg0Cho+IqPgsvv2wKd6yoJe8dcKmDyQQqxutwfWtzHbm3zF8bQJ4hf
+          8eEr9qAUaLL8NhVdxLBW/US9sL376DBnMhNjFTu0p1b9C0mCLohmomXnCOm4uq8L
+          s/qFZ6+x2iAnpbxPvPY7dGeJaPcOv8XY21RfwP0iLftF8E38vTnvde/4G2FB/t+s
+          hXrRFTt5chzXkrKzVyOP+DkpA8j+zouv+rsBcuUnWr3TUMo3j0uq28XrLFlyZLPR
+          ao+si31z7UhqI4WAzlJLeQvIn/cEakRYuZAHDag+1o4rFxL+2RAJwSJwIYVtDyc1
+          s+Xz/SFNjOGPAZYwZUodZSesnIoY6o3st9rQEAKEDIeGnG2cMw4G+CPnV6o0sTEY
+          fuZud4eqpWRX9bi6BMXLeRzKAhs143rELrITHabr4NyD9n/63xJFJtkHTEFgoS1p
+          XPvDlvQj0VZFZg92ApqB/r+sGyGLjib9dfYjteO/uZydvbBga8ZPG/GLDlJJGZQh
+          cEa6I8RFjSWo0oVVblnsFiECAwEAAQ==
+          -----END PUBLIC KEY-----
+          PEMEOF
+          # heredoc 带了缩进，去掉行首空白还原成合法 PEM
+          sed -i 's/^[[:space:]]*//' recipient.pem
+          openssl pkey -pubin -in recipient.pem -noout && echo "公钥格式正确"
+
+      - name: 还原 keystore 与密码到明文包
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RPHUB_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.RPHUB_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RPHUB_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RPHUB_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mkdir -p payload
+          test -n "$KEYSTORE_BASE64"
+          # 解码 keystore 本体。不打印任何内容，只报大小。
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > payload/rphub.keystore
+          echo "keystore 字节数: $(stat -c%s payload/rphub.keystore)"
+
+          # 三个密码写成 properties。用 printf 而非 echo，避免转义歧义。
+          {
+            printf 'storeFile=rphub.keystore\n'
+            printf 'storePassword=%s\n' "$STORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$KEY_PASSWORD"
+          } > payload/keystore.properties
+
+          # 顺手记下证书信息，方便本地核对是不是同一份密钥。
+          keytool -list -v \
+            -keystore payload/rphub.keystore \
+            -storepass "$STORE_PASSWORD" > payload/cert-info.txt 2>&1 || true
+          # 证书指纹是公开信息，可以进日志用于当场确认
+          grep -i "SHA256:" payload/cert-info.txt | head -2 || true
+
+          tar -cf payload.tar -C payload .
+          echo "打包字节数: $(stat -c%s payload.tar)"
+
+      - name: 混合加密（AES-256 内容 + RSA-OAEP 会话密钥）
+        run: |
+          set -euo pipefail
+          # 32 字节随机会话密钥。RSA-4096 OAEP 一次最多约 446 字节，
+          # keystore 有几 KB，所以必须走混合加密而不是直接 RSA。
+          openssl rand -out session.key 32
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
+            -in payload.tar -out out/payload.enc -pass file:session.key
+          openssl pkeyutl -encrypt -pubin -inkey recipient.pem \
+            -pkeyopt rsa_padding_mode:oaep \
+            -pkeyopt rsa_oaep_md:sha256 \
+            -in session.key -out out/session.key.enc
+          sha256sum out/payload.enc out/session.key.enc | tee out/SHA256SUMS
+          # 明文中间产物就地清除，不留在 runner 工作目录里
+          shred -u session.key payload.tar payload/rphub.keystore \
+            payload/keystore.properties payload/cert-info.txt 2>/dev/null || true
+          rm -rf payload
+
+      - name: 上传加密产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: signing-key-encrypted
+          path: out/
+          if-no-files-found: error
+          retention-days: 1
