@@ -8788,14 +8788,18 @@ const app = createApp({
             if (toolCall?.toolType === ACTIVE_TOOL_KEYWORD_TYPE || baseCallName === 'tool_grep') {
                 return ACTIVE_TOOL_KEYWORD_TYPE;
             }
-            return '';
+            if (toolCall?.toolType === ACTIVE_TOOL_VECTOR_TYPE || baseCallName === 'tool_memory') {
+                return ACTIVE_TOOL_VECTOR_TYPE;
+            }
+            return baseCallName || toolCall?.toolId || ACTIVE_TOOL_VECTOR_TYPE;
         };
 
         const getToolCallDisplayName = (toolCall) => {
             const groupKey = getActiveToolUiGroupKey(toolCall);
             if (groupKey === ACTIVE_TOOL_WEB_TYPE) return 'Tavily 联网搜索';
             if (groupKey === ACTIVE_TOOL_KEYWORD_TYPE) return '关键词检索';
-            return toolCall?.name || '工具调用';
+            if (groupKey === ACTIVE_TOOL_VECTOR_TYPE) return '向量记忆主动检索';
+            return toolCall?.name || '向量记忆主动检索';
         };
 
         const getToolCallModeText = (toolCall) => {
@@ -8812,7 +8816,8 @@ const app = createApp({
             if (groupKey === ACTIVE_TOOL_KEYWORD_TYPE) {
                 return mode === 'cover' ? '覆盖关键词检索' : '关键词检索';
             }
-            return '工具调用';
+
+            return mode === 'cover' ? '覆盖向量检索' : '向量检索';
         };
 
         const TOOL_CALL_RUNNING_STATUSES = ['running', 'receiving', 'queued'];
@@ -9210,6 +9215,10 @@ const app = createApp({
                     if (options.markRunning !== false) {
                         toolUi.status = 'running';
                         await saveChatHistoryNow();
+                    }
+
+                    if (isVectorActiveTool(toolCall.tool) && !memorySettings.enabled) {
+                        throw new Error('记忆系统未开启，无法执行向量检索。');
                     }
 
                     const results = isWebActiveTool(toolCall.tool)
