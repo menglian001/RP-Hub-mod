@@ -19,5 +19,8 @@ keystore.properties
 # 本地浏览器巡检产出的截图
 .preview-shots/
 
+# 本地临时调试页（点开头的一次性 e2e / 截图脚手架）
+/.ig*.html
+
 # session-local 笔记
 *_TODO.md
