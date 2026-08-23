@@ -465,8 +465,6 @@ const app = createApp({
             'dall-e', 'gpt-image', 'flux', 'sd', 'stable-diffusion', 'sdxl',
             'imagen', 'gemini', 'seedream', 'kolors', 'nai', 'midjourney', 'qwen'
         ]);
-        const apiTest = reactive({ running: false, state: 'idle', message: '' });
-        const imageGenTest = reactive({ running: false, state: 'idle', message: '' });
         const vertexImageSizeOptions = [
             { value: 'vertex_2_3', label: '竖图 2:3' },
             { value: 'vertex_3_2', label: '横图 3:2' },
@@ -4330,7 +4328,7 @@ const app = createApp({
         };
 
         // ============================================================
-        // === Mod Features: Multi-mode Image Gen + Connection Test ===
+        // === Mod Features: Multi-mode Image Gen ===
         // ============================================================
         const getActiveImageGenKey = () => {
             if (isAgnesImageGenMode()) return settings.agnesImageGenKey;
@@ -4673,151 +4671,6 @@ const app = createApp({
             showImageGenModelSelector.value = false;
         };
 
-        // --- Connection tests ---
-        const {
-            CONNECTION_TEST_PROMPT,
-            CONNECTION_TEST_PROMPT_OPENAI,
-            describeTestError,
-            withTestTimeout,
-            probeImageGenSrc
-        } = window.RPHubConnectionTest;
-
-        const testImageGenConnection = async () => {
-            if (imageGenTest.running) return;
-            imageGenTest.running = true;
-            imageGenTest.state = 'running';
-            imageGenTest.message = '正在请求生图服务，会真实生成一张图...';
-            const startedAt = performance.now();
-            try {
-                let detail = '';
-                let weak = false;
-                if (isOpenAIImageGen()) {
-                    const url = await requestOpenAIImage(CONNECTION_TEST_PROMPT_OPENAI, { withArtists: false });
-                    const size = await probeImageGenSrc(url);
-                    detail = `${size.width}×${size.height}`;
-                    weak = !!size.weak;
-                } else {
-                    const src = buildImageGenUrl({
-                        prompt: encodeURIComponent(CONNECTION_TEST_PROMPT),
-                        token: String(getActiveImageGenKey() || '').trim(),
-                        artist: encodeURIComponent(getImageGenArtists()),
-                        size: settings.imageSize
-                    });
-                    const size = await probeImageGenSrc(src);
-                    detail = `${size.width}×${size.height}`;
-                    weak = !!size.weak;
-                }
-                const elapsed = Math.round(performance.now() - startedAt);
-                imageGenStatus.value = 'connected';
-                imageGenLatency.value = elapsed;
-                imageGenTest.state = weak ? 'warn' : 'success';
-                imageGenTest.message = weak
-                    ? `图片能加载 · 耗时 ${elapsed}ms · ${detail}｜无法读取响应内容，不能排除是服务返回的"失败占位图"`
-                    : `生图连接成功 · 耗时 ${elapsed}ms · 图片 ${detail}`;
-                showToast(weak ? `生图返回了图片（${elapsed}ms）` : `生图连接成功（${elapsed}ms）`, weak ? 'info' : 'success', 3000);
-            } catch (error) {
-                console.error('Image gen test failed:', error);
-                imageGenStatus.value = 'error';
-                imageGenTest.state = 'error';
-                imageGenTest.message = `生图连接失败：${describeTestError(error)}`;
-                showToast('生图连接失败，详情见测试结果', 'error', 4000);
-            } finally {
-                imageGenTest.running = false;
-            }
-        };
-
-        const testApiConnection = async () => {
-            if (apiTest.running) return;
-            const apiKey = String(settings.apiKey || '').trim();
-            const apiUrl = String(settings.apiUrl || '').trim();
-            if (!apiUrl || !apiKey) {
-                apiTest.state = 'error';
-                apiTest.message = '请先填写 API 地址和 Key';
-                showToast('请先填写 API 地址和 Key', 'info');
-                return;
-            }
-            const model = String(settings.model || settings.balancedModel || settings.qualityModel || settings.fastModel || '').trim();
-            if (!model) {
-                apiTest.state = 'error';
-                apiTest.message = '请先选择一个模型';
-                showToast('请先选择一个模型', 'info');
-                return;
-            }
-            apiTest.running = true;
-            apiTest.state = 'running';
-            apiTest.message = `正在用 ${model} 发一次测试请求...`;
-            const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` };
-            const startedAt = performance.now();
-            try {
-                const response = await withTestTimeout(signal => fetch(getApiEndpoint('chat/completions'), {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({
-                        model,
-                        messages: [{ role: 'user', content: 'ping' }],
-                        max_tokens: 8,
-                        stream: false
-                    }),
-                    signal
-                }));
-                if (!response.ok) {
-                    const detail = await response.text().catch(() => '');
-                    throw new Error(`HTTP ${response.status} ${detail.slice(0, 160)}`.trim());
-                }
-                const payload = await response.json();
-                const reply = payload && Array.isArray(payload.choices) && payload.choices[0]
-                    ? (payload.choices[0].message || {}).content
-                    : '';
-                const elapsed = Math.round(performance.now() - startedAt);
-                apiStatus.value = 'connected';
-                apiLatency.value = elapsed;
-
-                let streamNote = '';
-                if (settings.stream) {
-                    try {
-                        const streamResp = await withTestTimeout(signal => fetch(getApiEndpoint('chat/completions'), {
-                            method: 'POST',
-                            headers,
-                            body: JSON.stringify({
-                                model,
-                                messages: [{ role: 'user', content: 'ping' }],
-                                max_tokens: 8,
-                                stream: true
-                            }),
-                            signal
-                        }));
-                        const contentType = streamResp.headers.get('content-type') || '';
-                        if (!streamResp.ok) {
-                            streamNote = `｜流式探测返回 HTTP ${streamResp.status}`;
-                        } else if (!contentType.includes('text/event-stream')) {
-                            streamNote = '｜流式不可用（响应不是 SSE），建议关闭"流式输出"';
-                        } else if (!streamResp.body || typeof streamResp.body.getReader !== 'function') {
-                            streamNote = '｜当前环境读不到流式响应，建议关闭"流式输出"';
-                        } else {
-                            streamNote = '｜流式正常';
-                            if (typeof streamResp.body.cancel === 'function') {
-                                streamResp.body.cancel().catch(() => { });
-                            }
-                        }
-                    } catch (streamError) {
-                        streamNote = `｜流式探测失败：${describeTestError(streamError)}，可尝试关闭"流式输出"`;
-                    }
-                }
-
-                apiTest.state = streamNote.includes('建议关闭') || streamNote.includes('失败') ? 'warn' : 'success';
-                const replyPreview = String(reply || '').trim().slice(0, 40);
-                apiTest.message = `API 连接成功 · ${model} · 耗时 ${elapsed}ms${replyPreview ? ` · 回复"${replyPreview}"` : ''}${streamNote}`;
-                showToast(`API 连接成功（${elapsed}ms）`, apiTest.state === 'warn' ? 'info' : 'success', 3000);
-            } catch (error) {
-                console.error('API test failed:', error);
-                apiStatus.value = 'error';
-                apiTest.state = 'error';
-                apiTest.message = `API 连接失败：${describeTestError(error)}`;
-                showToast('API 连接失败，详情见测试结果', 'error', 4000);
-            } finally {
-                apiTest.running = false;
-            }
-        };
         // ============================================================
         // === End Mod Features ===
         // ============================================================
@@ -11751,7 +11604,6 @@ const app = createApp({
             imageGenModeOptions, imageGenAvailableModels, imageGenModelsLoading, fetchImageGenModels,
             showImageGenModelSelector, imageGenModelSearchQuery, imageGenModelActiveTag, imageGenModelTags,
             filteredImageGenModels, openImageGenModelSelector, selectImageGenModel, getImageGenModel,
-            apiTest, imageGenTest, testApiConnection, testImageGenConnection,
             roleImages, imageLibraryRoleUuid, imageLibraryCategory, imageLibrarySearch, imageLibraryPreview,
             imageLibraryCharacter, filteredRoleImages, openImageLibraryCharacter, closeImageLibraryCharacter,
             setImageLibraryCategory, deleteRoleImage, toggleRoleImageFavorite, loadCurrentRoleImages,
