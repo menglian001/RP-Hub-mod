@@ -43,8 +43,16 @@ jobs:
           cat version.json
 
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy . --project-name=rp-hub-mod --branch=main --commit-dirty=true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          # 不用 cloudflare/wrangler-action@v3：它内部经 npx 调 wrangler，
+          # runner 上的 _npx 缓存目录会损坏，报 "npx failed with exit code 1"
+          # 且看不到 wrangler 自己的错误，排查时容易误判成 token 失效。
+          # 直接装固定版本再跑，行为可预测、报错也是 wrangler 的原文。
+          npm install -g wrangler@3.114.17
+          wrangler pages deploy . \
+            --project-name=rp-hub-mod \
+            --branch=main \
+            --commit-dirty=true

@@ -33,7 +33,19 @@ object ContentManager {
     private const val READ_TIMEOUT = 60_000
     private const val MAX_ZIP_BYTES = 200L * 1024 * 1024
 
-    data class Result(val updated: Boolean, val version: Int, val notes: String?)
+    /**
+     * 检查结果。
+     *
+     * [error] 为空表示流程正常走完（无论有没有新内容）；非空表示这次检查失败了，
+     * 内容是给用户看的原因。旧版把失败与「已是最新」都表示成 updated=false，
+     * 界面上二者不可区分，网络不通时看起来就像"已经最新"，热更新静默失效。
+     */
+    data class Result(
+        val updated: Boolean,
+        val version: Int,
+        val notes: String?,
+        val error: String? = null
+    )
 
     private fun prefs(ctx: Context): SharedPreferences =
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -180,7 +192,7 @@ object ContentManager {
             JSONObject(text)
         } catch (e: Exception) {
             Log.e(TAG, "读取版本清单失败: ${e.message}")
-            return Result(false, effectiveVersion(ctx), null)
+            return Result(false, effectiveVersion(ctx), null, "无法读取版本信息：${describe(e)}")
         }
 
         val remoteVersion = manifest.optInt("versionCode", 0)
@@ -191,7 +203,12 @@ object ContentManager {
 
         if (minShell > BuildConfig.SHELL_VERSION) {
             Log.w(TAG, "该内容版本要求更新的客户端，跳过热更新")
-            return Result(false, effectiveVersion(ctx), null)
+            return Result(
+                false,
+                effectiveVersion(ctx),
+                null,
+                "远端内容 v$remoteVersion 需要更新版客户端（要求 $minShell，当前 ${BuildConfig.SHELL_VERSION}），请下载新 APK"
+            )
         }
 
         val current = effectiveVersion(ctx)
@@ -210,7 +227,7 @@ object ContentManager {
                 val actual = sha256(tmpZip)
                 if (actual != expectedSha) {
                     Log.e(TAG, "校验失败: 期望 $expectedSha 实际 $actual")
-                    return Result(false, current, null)
+                    return Result(false, current, null, "更新包校验失败，可能下载不完整，稍后重试")
                 }
             }
 
@@ -222,7 +239,7 @@ object ContentManager {
             if (!File(staging, "index.html").isFile) {
                 Log.e(TAG, "更新包缺少 index.html")
                 staging.deleteRecursively()
-                return Result(false, current, null)
+                return Result(false, current, null, "更新包内容异常（缺少 index.html）")
             }
 
             prefs(ctx).edit().putInt(KEY_STAGING_VERSION, remoteVersion).apply()
@@ -236,10 +253,23 @@ object ContentManager {
             return Result(true, remoteVersion, notes)
         } catch (e: Exception) {
             Log.e(TAG, "更新失败，保留原内容: ${e.message}", e)
-            return Result(false, current, null)
+            return Result(false, current, null, "下载更新失败：${describe(e)}")
         } finally {
             tmpZip.delete()
         }
+    }
+
+    /**
+     * 把异常翻译成一句用户能看懂的原因。
+     * 直接用 message 常常是空的（例如 UnknownHostException 只带主机名），
+     * 那样提示框里会出现"下载更新失败：null"。
+     */
+    private fun describe(e: Exception): String = when (e) {
+        is java.net.UnknownHostException -> "域名解析失败，检查网络或代理"
+        is java.net.SocketTimeoutException -> "连接超时，检查网络或代理"
+        is java.net.ConnectException -> "无法连接服务器，检查网络或代理"
+        is javax.net.ssl.SSLException -> "HTTPS 连接被中断，检查网络或代理"
+        else -> e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
     }
 
     // ---- 网络 ----

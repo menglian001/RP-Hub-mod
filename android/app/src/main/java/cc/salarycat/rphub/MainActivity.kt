@@ -39,6 +39,9 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "MainActivity"
         private const val HOST = "localhost"
         private const val HOME_URL = "https://$HOST/index.html"
+
+        /** onResume 自动检查更新的最小间隔，避免每次切前台都打一次网络。 */
+        private const val AUTO_CHECK_INTERVAL_MS = 10 * 60 * 1000L
     }
 
     private lateinit var webView: WebView
@@ -48,6 +51,12 @@ class MainActivity : AppCompatActivity() {
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
+
+    /** 上次自动检查更新的时刻，用于 onResume 节流。0 表示还没查过。 */
+    private var lastAutoCheckAt = 0L
+
+    /** 静默检查的失败提示每个进程只弹一次，避免网络长期不通时反复打扰。 */
+    private var silentErrorShown = false
 
     private val fileChooser = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -107,6 +116,21 @@ class MainActivity : AppCompatActivity() {
 
         webView.loadUrl(HOME_URL)
 
+        checkUpdate(silent = true)
+    }
+
+    /**
+     * 切回前台时也检查一次更新。
+     *
+     * 只在 onCreate 里查会漏掉最常见的情形：进程一直活着，用户从后台切回来，
+     * Activity 不重建，于是永远不再检查，线上早就发了新内容也拿不到。
+     * 用时间间隔节流，避免频繁切前台时反复打网络。
+     */
+    override fun onResume() {
+        super.onResume()
+
+        val now = System.currentTimeMillis()
+        if (now - lastAutoCheckAt < AUTO_CHECK_INTERVAL_MS) return
         checkUpdate(silent = true)
     }
 
@@ -291,12 +315,29 @@ class MainActivity : AppCompatActivity() {
     /**
      * 后台检查更新。下载完成后不弹窗打断使用，
      * 若当前无内容可用则立即提升，否则下次启动自动生效。
+     *
+     * [silent] 为真时只在真的有变化或出错时提示；为假（用户主动点检查）时总给回应。
      */
     private fun checkUpdate(silent: Boolean) {
+        lastAutoCheckAt = System.currentTimeMillis()
+
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 ContentManager.checkAndDownload(applicationContext, autoPromote = true)
             }
+
+            // 失败必须说出来。旧版把失败和"已是最新"混成同一个分支，
+            // 静默检查时什么都不显示，网络不通看起来就跟已经最新一样。
+            // 但静默检查每进程只提示一次，长期无网时不至于每次切前台都弹。
+            result.error?.let { reason ->
+                Log.w(TAG, "检查更新失败: $reason")
+                if (!silent || !silentErrorShown) {
+                    if (silent) silentErrorShown = true
+                    Toast.makeText(this@MainActivity, reason, Toast.LENGTH_LONG).show()
+                }
+                return@launch
+            }
+            silentErrorShown = false
 
             if (!result.updated) {
                 if (!silent) {
