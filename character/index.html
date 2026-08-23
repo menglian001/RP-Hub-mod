@@ -420,53 +420,8 @@
                     设置
                 </h3>
                 <div class="flex flex-col gap-4">
-                    <!-- 仅保留风格和流式输出设定 -->
-                    <div class="form-control w-full">
-                        <label class="label"><span class="label-text font-medium">头像生成风格</span></label>
-                        <div class="grid grid-cols-2 gap-3">
-                            <div class="border rounded-xl p-3 cursor-pointer transition-all duration-200 flex items-center justify-center gap-2 relative overflow-hidden select-none group"
-                                :class="options.avatarStyle === 'default' ? 'border-primary bg-primary/10 text-primary ring-2 ring-primary/20 shadow-sm' : 'border-base-300 bg-base-100 hover:border-base-content/30 hover:bg-base-200/50'"
-                                @click="options.avatarStyle = 'default'">
-                                <span class="font-bold text-sm">韩漫小清新风</span>
-                                <div v-if="options.avatarStyle === 'default'"
-                                    class="absolute -right-3 -top-3 w-8 h-8 bg-primary/20 rounded-full blur-xl"></div>
-                            </div>
-                            <div class="border rounded-xl p-3 cursor-pointer transition-all duration-200 flex items-center justify-center gap-2 relative overflow-hidden select-none group"
-                                :class="options.avatarStyle === 'comicDoujin' ? 'border-primary bg-primary/10 text-primary ring-2 ring-primary/20 shadow-sm' : 'border-base-300 bg-base-100 hover:border-base-content/30 hover:bg-base-200/50'"
-                                @click="options.avatarStyle = 'comicDoujin'">
-                                <span class="font-bold text-sm">动漫同人风</span>
-                                <div v-if="options.avatarStyle === 'comicDoujin'"
-                                    class="absolute -right-3 -top-3 w-8 h-8 bg-primary/20 rounded-full blur-xl"></div>
-                            </div>
-                            <div class="border rounded-xl p-3 cursor-pointer transition-all duration-200 flex items-center justify-center gap-2 relative overflow-hidden select-none group"
-                                :class="options.avatarStyle === 'hentai' ? 'border-secondary bg-secondary/10 text-secondary ring-2 ring-secondary/20 shadow-sm' : 'border-base-300 bg-base-100 hover:border-base-content/30 hover:bg-base-200/50'"
-                                @click="options.avatarStyle = 'hentai'">
-                                <span class="font-bold text-sm">2.5D唯美风</span>
-                                <div v-if="options.avatarStyle === 'hentai'"
-                                    class="absolute -right-3 -top-3 w-8 h-8 bg-secondary/20 rounded-full blur-xl"></div>
-                            </div>
-                            <div class="border rounded-xl p-3 cursor-pointer transition-all duration-200 flex items-center justify-center gap-2 relative overflow-hidden select-none group"
-                                :class="options.avatarStyle === 'lolita25d' ? 'border-pink-400 bg-pink-50 text-pink-600 ring-2 ring-pink-200 shadow-sm' : 'border-base-300 bg-base-100 hover:border-base-content/30 hover:bg-base-200/50'"
-                                @click="options.avatarStyle = 'lolita25d'">
-                                <span class="font-bold text-sm">2.5D唯美风（萝）</span>
-                                <div v-if="options.avatarStyle === 'lolita25d'"
-                                    class="absolute -right-3 -top-3 w-8 h-8 bg-pink-300/40 rounded-full blur-xl"></div>
-                            </div>
-                            <div class="border rounded-xl p-3 cursor-pointer transition-all duration-200 flex items-center justify-center gap-2 relative overflow-hidden select-none group"
-                                :class="options.avatarStyle === 'anime' ? 'border-accent bg-accent/10 text-accent ring-2 ring-accent/20 shadow-sm' : 'border-base-300 bg-base-100 hover:border-base-content/30 hover:bg-base-200/50'"
-                                @click="options.avatarStyle = 'anime'">
-                                <span class="font-bold text-sm">本子里番风</span>
-                                <div v-if="options.avatarStyle === 'anime'"
-                                    class="absolute -right-3 -top-3 w-8 h-8 bg-accent/20 rounded-full blur-xl"></div>
-                            </div>
-                            <div class="border rounded-xl p-3 cursor-pointer transition-all duration-200 flex items-center justify-center gap-2 relative overflow-hidden select-none group"
-                                :class="options.avatarStyle === 'galgame' ? 'border-info bg-info/10 text-info ring-2 ring-info/20 shadow-sm' : 'border-base-300 bg-base-100 hover:border-base-content/30 hover:bg-base-200/50'"
-                                @click="options.avatarStyle = 'galgame'">
-                                <span class="font-bold text-sm">GalGame风</span>
-                                <div v-if="options.avatarStyle === 'galgame'"
-                                    class="absolute -right-3 -top-3 w-8 h-8 bg-info/20 rounded-full blur-xl"></div>
-                            </div>
-                        </div>
+                    <div class="rounded-xl border border-base-300/60 bg-base-200/30 px-4 py-3 text-sm text-base-content/65">
+                        生图版本与画师串跟随主界面设置
                     </div>
                     <div class="grid grid-cols-1 gap-3 mt-2">
                         <div
@@ -823,7 +778,6 @@
             <div class="drawer-content workshop-content flex flex-col h-full overflow-hidden relative bg-base-100">
                 <!-- Main Content Area -->
                 <div class="workshop-main flex-1 flex flex-col overflow-hidden">
-                    <!-- Tabs -->
                     <!-- Tabs -->
                     <div
                         class="bg-base-100/80 backdrop-blur-md border-b border-base-200 px-4 py-3 flex-none z-10 shadow-sm/50">
@@ -1767,17 +1721,14 @@
                             api.key = mainSettings.apiKey || '';
 
                             // Sync Image Gen
-                            // Always sync key even if empty to ensure reset
-                            options.imageGenKey = mainSettings.imageGenKey;
-
-                            // Map imageStyle to avatarStyle (vertical -> default, r18 -> hentai)
-                            if (mainSettings.imageStyle === 'r18') {
-                                options.avatarStyle = 'hentai';
-                            } else if (mainSettings.imageStyle === 'vertical') {
-                                options.avatarStyle = 'default';
-                            } else if (mainSettings.imageStyle === 'lolita25d') {
-                                options.avatarStyle = 'lolita25d';
-                            }
+                            options.imageGenKey = mainSettings.imageGenKey || '';
+                            options.imageModel = mainSettings.imageModel === 'nai-diffusion-5-full'
+                                ? 'nai-diffusion-5-full'
+                                : 'nai-diffusion-4-5-full';
+                            options.imageArtists = cardUtils.getImageStyleArtists(
+                                mainSettings.imageStyle,
+                                mainSettings.customImageArtists
+                            );
 
                             // Sync Models
                             options.customModels.quality = mainSettings.qualityModel || '';
@@ -1804,8 +1755,9 @@
                 const savedOptions = localStorage.getItem('ai_chargen_options');
                 const defaultOptions = {
                     generateExtra: true, // Default to true as requested
-                    avatarStyle: 'default',
                     imageGenKey: '',
+                    imageModel: 'nai-diffusion-4-5-full',
+                    imageArtists: cardUtils.getImageStyleArtists('vertical'),
                     customModels: {
                         quality: '',
                         balanced: '',
@@ -1826,7 +1778,7 @@
                 options.generateExtra = true;
 
                 watch(options, (newVal) => {
-                    const { customModels, ...persistentOptions } = newVal;
+                    const { customModels, imageGenKey, imageModel, imageArtists, avatarStyle, ...persistentOptions } = newVal;
                     localStorage.setItem('ai_chargen_options', JSON.stringify(persistentOptions));
                 }, { deep: true });
 
@@ -3505,10 +3457,10 @@ ${FIRST_MESSAGE_FINAL_CHECKS}
                 const generateAvatarUrl = (tag) => {
                     let url;
                     const tokenParam = options.imageGenKey.trim();
-                    const targetArtists = cardUtils.getImageStyleArtists(options.avatarStyle);
+                    const targetArtists = options.imageArtists;
 
                     const baseUrl = IMAGE_GEN_BASE_URL;
-                    url = `${baseUrl}/generate?tag=${encodeURIComponent(tag)}&token=${tokenParam}&model=nai-diffusion-4-5-full&artist=${encodeURIComponent(targetArtists)}&size=竖图&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}},awkward hand sign,weird hand gesture,contorted hand,unnatural finger pose,deformed hand gesture{shaka},{hang loose},{{rock on}},{shaka sign}&nocache=0&noise_schedule=karras`;
+                    url = `${baseUrl}/generate?tag=${encodeURIComponent(tag)}&token=${tokenParam}&model=${options.imageModel}&artist=${encodeURIComponent(targetArtists)}&size=竖图&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}},awkward hand sign,weird hand gesture,contorted hand,unnatural finger pose,deformed hand gesture{shaka},{hang loose},{{rock on}},{shaka sign}&nocache=0&noise_schedule=karras`;
                     return url;
                 };
 

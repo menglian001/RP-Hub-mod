@@ -1,27 +1,20 @@
 import http from 'node:http';
 
 const port = Number(process.env.PORT) || 3000;
-const ttlMs = Math.min(300_000, Math.max(30_000, Number(process.env.PRESENCE_TTL_MS) || 60_000));
 const parseVersionId = value => /^\d{5}$/.test(String(value ?? '').trim())
     ? Number(value)
     : null;
-// 二改站点的公告 ID 与上游独立维护，默认读取本二改的线上内容。
-// 需要改为其他来源时设置 VERSION_SOURCE_URL；设为空字符串则关闭版本心跳提醒。
-const versionSourceUrl = process.env.VERSION_SOURCE_URL === undefined
-    ? 'https://rp-hub-mod.pages.dev/assets/js/built-in-content.js'
-    : String(process.env.VERSION_SOURCE_URL).trim();
+const versionSourceUrl = 'https://sta1n156.github.io/RP-Hub/assets/js/built-in-content.js';
 const versionRefreshMs = 60_000;
-let latestVersionId = 0;
+let latestVersionId = 10189;
 let nextVersionRefreshAt = 0;
 let versionRefreshPromise = null;
 const allowedOrigins = String(process.env.ALLOWED_ORIGINS || '*')
     .split(',')
     .map(origin => origin.trim())
     .filter(Boolean);
-const clients = new Map();
 
 const refreshLatestVersionId = () => {
-    if (!versionSourceUrl) return Promise.resolve();
     if (versionRefreshPromise) return versionRefreshPromise;
     if (Date.now() < nextVersionRefreshAt) return Promise.resolve();
     nextVersionRefreshAt = Date.now() + versionRefreshMs;
@@ -47,13 +40,6 @@ const refreshLatestVersionId = () => {
     return versionRefreshPromise;
 };
 
-const removeExpired = () => {
-    const now = Date.now();
-    clients.forEach((expiresAt, clientId) => {
-        if (expiresAt <= now) clients.delete(clientId);
-    });
-};
-
 const getCorsOrigin = (origin) => {
     if (allowedOrigins.includes('*')) return '*';
     return origin && allowedOrigins.includes(origin) ? origin : '';
@@ -68,22 +54,14 @@ const sendJson = (response, status, body, corsOrigin = '') => {
     response.end(JSON.stringify(body));
 };
 
-const readJson = (request) => new Promise((resolve, reject) => {
+const readJson = async (request) => {
     let body = '';
-    request.setEncoding('utf8');
-    request.on('data', chunk => {
+    for await (const chunk of request) {
         body += chunk;
-        if (body.length > 2048) request.destroy();
-    });
-    request.on('end', () => {
-        try {
-            resolve(JSON.parse(body || '{}'));
-        } catch {
-            reject(new Error('Invalid JSON'));
-        }
-    });
-    request.on('error', reject);
-});
+        if (body.length > 2048) throw new Error('Request too large');
+    }
+    return JSON.parse(body || '{}');
+};
 
 const server = http.createServer(async (request, response) => {
     const origin = request.headers.origin || '';
@@ -108,24 +86,21 @@ const server = http.createServer(async (request, response) => {
         return sendJson(response, 200, { ok: true }, corsOrigin);
     }
 
-    if (request.method === 'GET' && url.pathname === '/v1/online') {
-        removeExpired();
-        return sendJson(response, 200, { online: clients.size }, corsOrigin);
+    if (request.method === 'GET' && url.pathname === '/v1/version') {
+        const currentVersionId = parseVersionId(url.searchParams.get('current'));
+        await refreshLatestVersionId();
+        return sendJson(response, 200, {
+            latestVersionId,
+            updateAvailable: currentVersionId !== null && latestVersionId > currentVersionId
+        }, corsOrigin);
     }
 
+    // Keep old pages update-capable without storing client IDs or counting users.
     if (request.method === 'POST' && url.pathname === '/v1/presence') {
         try {
-            const { clientId, versionId } = await readJson(request);
-            if (!/^[a-zA-Z0-9_-]{16,128}$/.test(String(clientId || ''))) {
-                return sendJson(response, 400, { error: 'Invalid clientId' }, corsOrigin);
-            }
-            const currentVersionId = parseVersionId(versionId);
+            const currentVersionId = parseVersionId((await readJson(request)).versionId);
             await refreshLatestVersionId();
-            removeExpired();
-            clients.set(clientId, Date.now() + ttlMs);
             return sendJson(response, 200, {
-                online: clients.size,
-                expiresIn: ttlMs,
                 latestVersionId,
                 updateAvailable: currentVersionId !== null && latestVersionId > currentVersionId
             }, corsOrigin);
@@ -137,12 +112,10 @@ const server = http.createServer(async (request, response) => {
     return sendJson(response, 404, { error: 'Not found' }, corsOrigin);
 });
 
-const cleanupTimer = setInterval(removeExpired, ttlMs);
-cleanupTimer.unref();
 refreshLatestVersionId();
 
 server.listen(port, '0.0.0.0', () => {
-    console.log(`RP-Hub presence service listening on ${port}`);
+    console.log(`RP-Hub update check service listening on ${port}`);
 });
 
 const shutdown = () => server.close(() => process.exit(0));

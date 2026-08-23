@@ -21,6 +21,7 @@ keystore.properties
 
 # 本地临时调试页（点开头的一次性 e2e / 截图脚手架）
 /.ig*.html
+/.mg*.html
 
 # session-local 笔记
 *_TODO.md

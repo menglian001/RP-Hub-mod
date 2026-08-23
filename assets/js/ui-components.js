@@ -301,9 +301,9 @@
         { view: 'images', label: '图片管理', icon: 'M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z' }
     ]);
     const onlineItems = Object.freeze([
-        { view: 'generator', label: '角色卡生成', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
-        { view: 'square', label: '万相广场', square: true },
-        { view: 'novel', label: '墨韵·造梦', icon: 'M20 19V16H7C5.34315 16 4 17.3431 4 19M8.8 22H16.8C17.9201 22 18.4802 22 18.908 21.782C19.2843 21.5903 19.5903 21.2843 19.782 20.908C20 20.4802 20 19.9201 20 18.8V5.2C20 4.07989 20 3.51984 19.782 3.09202C19.5903 2.71569 19.2843 2.40973 18.908 2.21799C18.4802 2 17.9201 2 16.8 2H8.8C7.11984 2 6.27976 2 5.63803 2.32698C5.07354 2.6146 4.6146 3.07354 4.32698 3.63803C4 4.27976 4 5.11984 4 6.8V17.2C4 18.8802 4 19.7202 4.32698 20.362C4.6146 20.9265 5.07354 21.3854 5.63803 21.673C6.27976 22 7.11984 22 8.8 22Z' }
+        { view: 'generator', label: '角色卡生成', icon: 'M15 8a3 3 0 11-6 0 3 3 0 016 0zm-3 5c-4 0-7 2-7 5v1h8m5-6v6m-3-3h6' },
+        { view: 'novel', label: '小说生成', icon: 'M20 19V16H7C5.34315 16 4 17.3431 4 19M8.8 22H16.8C17.9201 22 18.4802 22 18.908 21.782C19.2843 21.5903 19.5903 21.2843 19.782 20.908C20 20.4802 20 19.9201 20 18.8V5.2C20 4.07989 20 3.51984 19.782 3.09202C19.5903 2.71569 19.2843 2.40973 18.908 2.21799C18.4802 2 17.9201 2 16.8 2H8.8C7.11984 2 6.27976 2 5.63803 2.32698C5.07354 2.6146 4.6146 3.07354 4.32698 3.63803C4 4.27976 4 5.11984 4 6.8V17.2C4 18.8802 4 19.7202 4.32698 20.362C4.6146 20.9265 5.07354 21.3854 5.63803 21.673C6.27976 22 7.11984 22 8.8 22Z' },
+        { view: 'square', label: '万相广场', square: true }
     ]);
     const advancedItems = Object.freeze([
         { view: 'presets', label: '预设', icon: 'M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4M6 18a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4' },
@@ -324,7 +324,7 @@
         },
         emits: ['update:current-view', 'update:collapsed', 'toggle-online', 'toggle-advanced', 'close-mobile'],
         setup(props, { emit }) {
-            const { online } = window.RPHubPresence.usePresence();
+            window.RPHubUpdateCheck.useUpdateCheck();
             const selectView = (view) => {
                 emit('update:current-view', view);
                 emit('close-mobile');
@@ -337,7 +337,6 @@
                 advancedViews: advancedItems.map(item => item.view),
                 itemClass,
                 onlineItems,
-                online,
                 onlineViews: onlineItems.map(item => item.view),
                 primaryItems,
                 selectView
@@ -458,10 +457,7 @@
                         </div>
                         <div v-if="!collapsed" class="ml-3 whitespace-nowrap overflow-hidden">
                             <div class="text-sm font-bold text-gray-900 truncate">{{ user.name }}</div>
-                            <div class="flex items-center gap-1.5 text-xs text-gray-500">
-                                <span v-if="online !== null" class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-                                <span>{{ online === null ? 'User' : online + ' 人在线' }}</span>
-                            </div>
+                            <div class="text-xs text-gray-500">User</div>
                         </div>
                     </div>
                 </div>
@@ -1035,7 +1031,7 @@
                             </div>
                             <ul class="list-disc list-outside ml-9 space-y-1.5 text-sm text-yellow-700">
                                 <li>您可以在 “世界书 -> 自动生图” 手动管理此功能。</li>
-                                <li>前往 “设置” 可以切换生图风格与比例。</li>
+                                <li>前往 “设置” 可以切换生图版本、风格与比例。</li>
                             </ul>
                         </div>
                     </div>
@@ -1227,10 +1223,15 @@
                                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                             </button>
                         </div>
-                        <div class="flex p-1 bg-gray-200/50 rounded-xl overflow-x-auto no-scrollbar gap-1">
+                        <div class="segmented-switch segmented-switch--compact segmented-switch--four w-full">
+                            <div class="segmented-switch__indicator" :class="{
+                                'is-position-2': tab === 'description',
+                                'is-position-3': tab === 'personality',
+                                'is-position-4': tab === 'first_mes'
+                            }"></div>
                             <button v-for="item in tabs" :key="item.value" @click="$emit('update:tab', item.value)"
-                                :class="['flex-1 px-4 py-2 text-sm font-bold transition-all rounded-lg whitespace-nowrap', tab === item.value ? 'bg-white text-primary-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 hover:bg-white/50']">
-                                {{ item.label }}
+                                class="segmented-switch__option" :class="{ 'is-active': tab === item.value }">
+                                <span>{{ item.label }}</span>
                             </button>
                         </div>
                     </div>
@@ -1935,7 +1936,20 @@
             'update:page', 'update:help-topic'
         ],
         setup() {
+            const formatDuration = (value) => {
+                if (!Number.isFinite(value)) return '--';
+                if (value < 1000) return `${Math.round(value)}ms`;
+                return `${Number((value / 1000).toFixed(1))}s`;
+            };
+            const formatOutputSpeed = (record) => {
+                if (!Number.isFinite(record?.durationMs) || record.durationMs <= 0
+                    || !Number.isFinite(record?.outputCharacters) || record.outputCharacters <= 0) return '--';
+                return `${Math.round(record.outputCharacters * 1000 / record.durationMs)}字/s`;
+            };
             return {
+                formatDuration,
+                formatOutputSpeed,
+                formatQuota: quota => `¥${(Math.trunc(quota / 500000 * 10000) / 10000).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`,
                 filterOptions: Object.freeze([
                     { value: 'all', label: '全部', position: '' },
                     { value: 'chat', label: '主对话', position: 'is-position-2' },
@@ -1995,14 +2009,14 @@
                     </div>
                 </div>
 
-                <div class="relative mb-6 flex items-center justify-between gap-4 rounded-2xl border border-primary-100 bg-white px-4 py-3.5 shadow-sm md:px-5">
-                    <div class="flex min-w-0 items-center text-base font-semibold text-gray-700"><span>总用量</span>
+                <div class="relative mb-6 flex items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
+                    <div class="flex min-w-0 items-center text-sm font-semibold text-gray-500"><span>总用量</span>
                         <settings-help topic="totalTokens" :open-topic="helpTopic" label="查看总用量说明" icon-class=""
                             popover-class="token-usage-help-popover" @toggle="$emit('update:help-topic', $event)">
                             汇总当前类型和时间筛选范围内，输入 Token（包括缓存读取）与输出 Token 的总和。
                         </settings-help>
                     </div>
-                    <span class="flex-none whitespace-nowrap font-mono text-xl font-bold tracking-tight text-gray-800">{{ formatAggregate(stats.inputTokens + stats.cacheReadTokens + stats.outputTokens, stats.inputTokensReports + stats.cacheReadTokensReports + stats.outputTokensReports) }}</span>
+                    <div class="flex-shrink-0 whitespace-nowrap font-mono text-xl font-bold tabular-nums text-gray-900">{{ formatAggregate(stats.inputTokens + stats.cacheReadTokens + stats.outputTokens, stats.inputTokensReports + stats.cacheReadTokensReports + stats.outputTokensReports) }}</div>
                 </div>
 
                 <div class="flex items-center justify-between mb-3">
@@ -2012,37 +2026,45 @@
                 <div v-if="records.length > 0" class="space-y-3">
                     <article v-for="record in records" :key="record.id"
                         class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm transition-colors hover:border-gray-300">
-                        <div class="mb-3 flex items-start gap-3">
-                            <div class="min-w-0 flex-1">
-                                <div class="flex min-w-0 items-center gap-2">
-                                    <span class="flex flex-shrink-0 items-center gap-1.5 text-sm font-semibold text-gray-600">
-                                        <span class="h-1.5 w-1.5 rounded-full bg-primary-400"></span>{{ getTypeLabel(record.type) }}
-                                    </span>
-                                    <span class="min-w-0 flex-1 truncate text-sm text-gray-600" :title="record.model">{{ record.model || '未知模型' }}</span>
-                                </div>
-                                <div v-if="record.characterName || record.detail" class="mt-1.5 min-w-0 truncate text-xs text-gray-400">
-                                    {{ [record.characterName, record.detail].filter(Boolean).join(' · ') }}
-                                </div>
+                        <div class="mb-3 min-w-0">
+                            <div class="flex min-w-0 items-center justify-between gap-3">
+                                <span class="min-w-0 flex-1 truncate text-sm text-gray-600" :title="record.model">{{ record.model || '未知模型' }}</span>
+                                <span class="flex-shrink-0 text-xs font-semibold text-gray-500">{{ getTypeLabel(record.type) }}</span>
                             </div>
-                            <time class="flex-shrink-0 text-xs text-gray-400">{{ formatTime(record.timestamp) }}</time>
+                            <div class="mt-1.5 flex min-w-0 items-center justify-between gap-3">
+                                <div class="flex min-w-0 items-center gap-3 text-xs text-gray-400">
+                                    <span>耗时 {{ formatDuration(record.durationMs) }}</span>
+                                    <span>速度 {{ formatOutputSpeed(record) }}</span>
+                                </div>
+                                <time class="flex-shrink-0 text-xs text-gray-400">{{ formatTime(record.timestamp) }}</time>
+                            </div>
                         </div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <div class="rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-3">
-                                <div class="flex items-center gap-1.5 text-xs font-medium text-gray-500"><span class="h-1.5 w-1.5 rounded-full bg-primary-500"></span>输入</div>
-                                <div class="mt-1.5 flex items-end gap-1 font-mono leading-none">
-                                    <span class="text-base font-bold text-gray-800">{{ formatCount(getUncachedInput(record)) }}</span>
+                        <div class="space-y-1.5 rounded-xl border border-gray-100 bg-gray-50/60 px-3 py-2.5">
+                            <div class="flex min-w-0 items-center justify-between gap-3 whitespace-nowrap">
+                                <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-primary-500"></span>输入
+                                </span>
+                                <span class="flex min-w-0 items-center gap-1 font-mono">
+                                    <span class="text-sm font-bold text-gray-800">{{ formatCount(getUncachedInput(record)) }}</span>
                                     <span v-if="Number(record.cacheReadTokens) > 0"
-                                        class="inline-flex items-center gap-0.5 text-sm font-normal text-gray-500/80">
-                                        <svg class="h-3.5 w-3.5 flex-none" fill="none" stroke="currentColor" aria-hidden="true"><use href="#icon-arrow-down"></use></svg>
+                                        class="inline-flex min-w-0 items-center gap-0.5 text-sm font-bold text-gray-500/80"
+                                        title="缓存读取">
+                                        <svg class="h-4 w-4 flex-none" fill="none" stroke="currentColor" aria-hidden="true"><use href="#icon-arrow-down"></use></svg>
                                         {{ formatCount(record.cacheReadTokens) }}
                                     </span>
-                                </div>
+                                </span>
                             </div>
-                            <div class="rounded-xl border border-gray-100 bg-gray-50/70 px-3 py-3">
-                                <div class="flex items-center gap-1.5 text-xs font-medium text-gray-500"><span class="h-1.5 w-1.5 rounded-full bg-yellow-400"></span>输出</div>
-                                <div class="mt-1.5 flex items-end gap-1 font-mono leading-none">
-                                    <span class="text-base font-bold text-gray-800">{{ formatCount(record.outputTokens) }}</span>
-                                </div>
+                            <div class="flex min-w-0 items-center justify-between gap-3 whitespace-nowrap">
+                                <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-yellow-400"></span>输出
+                                </span>
+                                <span class="font-mono text-sm font-bold text-gray-800">{{ formatCount(record.outputTokens) }}</span>
+                            </div>
+                            <div v-if="Number.isFinite(record.actualQuota)" class="flex min-w-0 items-center justify-between gap-3 whitespace-nowrap">
+                                <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-green-500"></span>消耗
+                                </span>
+                                <span class="font-mono text-sm font-bold text-gray-800" :title="record.usageGroup ? '计费分组：' + record.usageGroup : ''">{{ formatQuota(record.actualQuota) }}</span>
                             </div>
                         </div>
                     </article>

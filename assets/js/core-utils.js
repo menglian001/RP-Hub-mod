@@ -950,7 +950,7 @@ window.RPHubUtils = {
                 id: 'sta1n',
                 name: 'STA1N API',
                 apiUrl: 'https://cdn.sta1n.cn/v1',
-                icon: 'https://img.cdn1.vip/i/69c18cc07538b_1774292160.webp'
+                icon: 'https://picui.ogmua.cn/s1/2026/08/21/6a87a751bf871.webp'
             }),
             Object.freeze({
                 id: 'deepseek',
@@ -998,6 +998,10 @@ window.RPHubUtils = {
                 { value: 'galgame', label: 'GalGame风' },
                 { value: 'custom', label: '自定义' }
             ]),
+            imageModels: Object.freeze([
+                { value: 'nai-diffusion-4-5-full', label: 'V4.5 完整版（-1）' },
+                { value: 'nai-diffusion-5-full', label: 'V5 完整版（-5）' }
+            ]),
             imageSizes: Object.freeze([
                 { value: '竖图', label: '竖图(-1)' },
                 { value: '横图', label: '横图(-1)' },
@@ -1009,7 +1013,7 @@ window.RPHubUtils = {
                 { value: '4K横图', label: '4K横图(-25)' },
                 { value: '4K方图', label: '4K方图(-25)' }
             ]),
-            imageCounts: Object.freeze([1, 2, 3, 4, 5, 6].map(count => ({
+            imageCounts: Object.freeze([2, 3, 4, 5, 6, 7, 8].map(count => ({
                 value: count,
                 label: `${count} 张`
             }))),
