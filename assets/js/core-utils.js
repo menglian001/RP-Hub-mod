@@ -878,7 +878,53 @@ window.RPHubUtils = {
         img.src = src;
     });
 
+    /**
+     * 原生保存通道。套壳环境里 <a download> 对 blob: URL 基本无效，
+     * 导出的文件不会落盘。壳提供了 RPHubNative.saveBase64，
+     * 这里优先走它：blob → data URL → 交给原生写入。
+     *
+     * 落盘位置由壳决定：普通文件进 Download/RPHub，
+     * 图片额外插入相册 Pictures/RPHub。
+     * 任何一步失败都回退到 <a download>，保证浏览器里行为不变。
+     */
+    const saveViaNative = async (blob, filename) => {
+        const bridge = window.RPHubNative;
+        if (!bridge || typeof bridge.saveBase64 !== 'function') return false;
+        try {
+            const dataUrl = await blobToDataUrl(blob);
+            if (typeof dataUrl !== 'string' || !dataUrl) return false;
+            // 壳签名是 saveBase64(fileName, mime, dataUrl)，且它自己会剥掉
+            // "data:*;base64," 前缀，所以整条 data URL 直接传进去。
+            const raw = bridge.saveBase64(filename, blob.type || '', dataUrl);
+            // 新壳返回 JSON 字符串 {"ok":true|false,...}；
+            // 旧壳返回 void。注意不能直接对返回值做真值判断 ——
+            // 失败时的 '{"ok":false,...}' 也是非空字符串，会被误判成成功。
+            if (raw === undefined || raw === null || raw === '') return true;
+            if (typeof raw === 'boolean') return raw;
+            try {
+                return !!JSON.parse(String(raw)).ok;
+            } catch (parseError) {
+                // 返回了无法解析的东西，保守当成功，避免同一份文件写两遍
+                return true;
+            }
+        } catch (error) {
+            console.warn('原生保存失败，回退到浏览器下载', error);
+            return false;
+        }
+    };
+
     const downloadBlob = (blob, filename, options = {}) => {
+        // 先试原生保存；成功就不再造 <a>，避免两次写盘。
+        // saveViaNative 是异步的，这里不 await —— downloadBlob 的调用方
+        // 全部按同步使用（app.js:3113 / 9830 / 11065 / 11132 / 11152），
+        // 改成 async 会波及全部调用点。回退分支放在 then 里。
+        saveViaNative(blob, filename).then((saved) => {
+            if (saved) return;
+            fallbackDownload(blob, filename, options);
+        });
+    };
+
+    const fallbackDownload = (blob, filename, options = {}) => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;

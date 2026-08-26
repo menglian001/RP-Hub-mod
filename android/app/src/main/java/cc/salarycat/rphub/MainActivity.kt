@@ -179,6 +179,13 @@ class MainActivity : AppCompatActivity() {
             loadWithOverviewMode = true
             javaScriptCanOpenWindowsAutomatically = true
             setSupportMultipleWindows(false)
+
+            // 页面自身是 https://localhost（WebViewAssetLoader 提供），
+            // 默认策略会把它发往 http://192.168.x.x 的请求当混合内容拦掉，
+            // 于是局域网自建 API 完全连不上。这里放行混合内容。
+            // 配套 AndroidManifest 的 usesCleartextTraffic=true —— 两者缺一都不行：
+            // 前者是 WebView 层策略，后者是系统层明文 HTTP 开关。
+            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
         }
 
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
