@@ -32,17 +32,16 @@ done
 # 内置内容版本号 = 提交总数，与 deploy.yml 的算法一致
 CODE="$(git rev-list --count HEAD)"
 NOTES="$(git log -1 --pretty=%s)"
-SHA="$(cd "$DST" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
-
+# 内置这份 version.json 只用于「我内置的内容是第几版」这一个判断，
+# 壳只读 versionCode。sha256 与 size 曾经分别填成目录哈希与 0 —— 与
+# 线上 content.zip 的真实值对不上，看着像坏数据。既然内置内容不是
+# 从 zip 解出来的，这两个字段在这里没有意义，直接省掉。
 cat > "$DST/version.json" <<EOF
 {
   "versionCode": $CODE,
   "versionName": "1.0.$CODE",
   "notes": "$NOTES",
-  "minShellVersion": 1,
-  "zip": "content.zip",
-  "sha256": "$SHA",
-  "size": 0
+  "minShellVersion": 1
 }
 EOF
 
