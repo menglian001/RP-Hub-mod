@@ -1476,7 +1476,6 @@
                             <div v-if="!(templateData.changeLog || []).length" class="bg-white border border-dashed border-gray-200 rounded-2xl p-8 text-center text-gray-400">暂无变更记录</div>
                             <div v-else class="space-y-3">
                                 <div v-for="log in (templateData.changeLog || []).slice(0, 1)" :key="log.id" class="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
-                                    <div v-if="log.reason" class="rounded-xl bg-amber-50/70 border border-amber-100 px-3 py-2 text-xs text-amber-800 leading-relaxed">{{ log.reason }}</div>
                                     <div class="mt-3 space-y-3">
                                         <div v-for="(change, key) in (log.changes || {})" :key="key" class="rounded-xl border border-gray-100 bg-gray-50/60 p-3">
                                             <div class="text-xs font-bold text-gray-700 mb-2">{{ key }}</div>
@@ -2029,7 +2028,7 @@
                         <div class="mb-3 min-w-0">
                             <div class="flex min-w-0 items-center justify-between gap-3">
                                 <span class="min-w-0 flex-1 truncate text-sm text-gray-600" :title="record.model">{{ record.model || '未知模型' }}</span>
-                                <span class="flex-shrink-0 text-xs font-semibold text-gray-500">{{ getTypeLabel(record.type) }}</span>
+                                 <span class="flex-shrink-0 text-sm font-semibold text-gray-500">{{ getTypeLabel(record.type) }}</span>
                             </div>
                             <div class="mt-1.5 flex min-w-0 items-center justify-between gap-3">
                                 <div class="flex min-w-0 items-center gap-3 text-xs text-gray-400">

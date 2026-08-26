@@ -1045,11 +1045,14 @@
 
         const assistantTopEntries = Array.isArray(groups.assistant_top) ? groups.assistant_top : [];
         if (assistantTopEntries.length > 0) {
-            finalMessages.push({
-                role: 'system',
-                content: `[Instructions for next message]\n${joinEntries(assistantTopEntries)}`,
-                _worldInfoEntries: assistantTopEntries
-            });
+            const lastAssistantMessage = finalMessages.slice().reverse().find(message => message?.role === 'assistant');
+            if (lastAssistantMessage) {
+                lastAssistantMessage.content = `${joinEntries(assistantTopEntries)}\n\n${lastAssistantMessage.content}`;
+                lastAssistantMessage._worldInfoEntries = [
+                    ...(lastAssistantMessage._worldInfoEntries || []),
+                    ...assistantTopEntries
+                ];
+            }
         }
         return finalMessages;
     };
@@ -1634,24 +1637,17 @@ ${content}
         return typeof schema === 'string' ? schema : JSON.stringify(schema, null, 2);
     };
 
-    const UI_TEMPLATE_UPDATES_PATTERN = /<ui_template_updates\b[^>]*>([\s\S]*?)<\/ui_template_updates>|(\{\s*"updates"\s*:[\s\S]*$)/i;
     const findUiTemplateUpdateBlock = (text) => {
         const source = String(text || '');
         const taggedCandidate = window.RPHubCardUtils.findLastUnprotectedMatch(source, /<ui_template_updates\b[^>]*>/i);
         const taggedTail = taggedCandidate ? source.slice(taggedCandidate.index).trimEnd() : '';
         const tagged = taggedTail.match(/^<ui_template_updates\b[^>]*>([\s\S]*?)(?:<\/ui_template_updates>)?$/i);
         if (tagged) {
-            const result = [taggedTail, tagged[1], undefined];
+            const result = [taggedTail, tagged[1]];
             result.index = taggedCandidate.index;
             return result;
         }
-        const candidate = window.RPHubCardUtils.findLastUnprotectedMatch(source, /\{\s*"updates"\s*:/i);
-        if (!candidate) return null;
-        const tail = source.slice(candidate.index).trimEnd();
-        if (!/^\{\s*"updates"\s*:/i.test(tail)) return null;
-        const result = [tail, undefined, tail];
-        result.index = candidate.index;
-        return result;
+        return null;
     };
 
     const stripUiTemplateUpdateBlock = (text) => {
@@ -1660,76 +1656,104 @@ ${content}
         return match ? source.slice(0, match.index).trimEnd() : source;
     };
 
-    const createDetailedJsonSyntaxError = (error, content) => {
-        const positionMatch = String(error?.message || '').match(/position\s+(\d+)/i);
-        if (!positionMatch) return error;
-        const position = Math.min(Number(positionMatch[1]), content.length);
-        const beforePosition = content.slice(0, position);
-        const line = beforePosition.split('\n').length;
-        const lineStart = beforePosition.lastIndexOf('\n') + 1;
-        const column = position - lineStart + 1;
-        const contextStart = Math.max(0, position - 36);
-        const contextEnd = Math.min(content.length, position + 37);
-        const before = content.slice(contextStart, position).replace(/\r?\n/g, '↵');
-        const current = content.slice(position, position + 1) || '文本结尾';
-        const after = content.slice(position + 1, contextEnd).replace(/\r?\n/g, '↵');
-        const message = String(error.message)
-            .replace(/\s+at position\s+\d+(?:\s+\(line\s+\d+\s+column\s+\d+\))?$/i, '');
-        const hint = current === ']' && /Expected ',' or '}' after property value/i.test(message)
-            ? '；此处在数组结束前缺少“}”，需要先关闭当前这一项对象'
-            : current === '}' && /Expected ',' or ']' after array element/i.test(message)
-                ? '；此处在数组项结束后多写了一个“}”'
-                : '';
-        const detailedError = new SyntaxError(
-            `${message}${hint}；精确位置：第 ${line} 行第 ${column} 列（索引 ${position}）；附近：${before}⟦${current}⟧${after}`
-        );
-        detailedError.jsonSource = content;
-        detailedError.jsonPosition = position;
-        detailedError.jsonLine = line;
-        detailedError.jsonColumn = column;
-        return detailedError;
-    };
-
-    const parseUiTemplateUpdateJson = (rawContent) => {
+    const parseUiTemplateUpdates = (rawContent) => {
         const normalizedContent = String(rawContent || '')
             .replace(/^<ui_template_updates\b[^>]*>\s*/i, '')
             .replace(/\s*<\/ui_template_updates>$/i, '')
-            .replace(/^```(?:json)?\s*/i, '')
-            .replace(/```\s*$/i, '')
             .trim();
-        try {
-            return JSON.parse(normalizedContent);
-        } catch (primaryError) {
-            throw createDetailedJsonSyntaxError(primaryError, normalizedContent);
-        }
+        const lines = normalizedContent ? normalizedContent.split(/\r?\n/) : [];
+        const updates = [];
+        const parseError = (message, lineNumber) => {
+            const error = new SyntaxError(`简化变量格式错误：第 ${lineNumber} 行${message}`);
+            error.jsonSource = normalizedContent;
+            error.jsonLine = lineNumber;
+            throw error;
+        };
+        const parseVariableLines = (items, startLine) => {
+            const variables = {};
+            for (let index = 0; index < items.length; index += 1) {
+                const item = items[index];
+                const lineNumber = item.lineNumber || startLine;
+                const text = String(item.text || '').replace(/^(?:&#x20;)+/, '').trim();
+                if (!text) continue;
+                const separator = text.indexOf('=');
+                if (separator <= 0) parseError('应为“路径=值”', lineNumber || startLine);
+                const path = text.slice(0, separator).trim();
+                if (!path) parseError('缺少变量路径', lineNumber || startLine);
+                let rawValue = text.slice(separator + 1).trim();
+                if (!rawValue) {
+                    variables[path] = '';
+                    continue;
+                }
+                let parsedValue;
+                try {
+                    parsedValue = JSON.parse(rawValue);
+                } catch (error) {
+                    if (!/^[\[{]/.test(rawValue)) {
+                        variables[path] = rawValue;
+                        continue;
+                    }
+                    let completed = false;
+                    for (let nextIndex = index + 1; nextIndex < items.length; nextIndex += 1) {
+                        const continuation = String(items[nextIndex].text || '')
+                            .replace(/^(?:&#x20;)+/, '')
+                            .trim();
+                        if (!continuation) continue;
+                        rawValue += `\n${continuation}`;
+                        try {
+                            parsedValue = JSON.parse(rawValue);
+                            index = nextIndex;
+                            completed = true;
+                            break;
+                        } catch (continuationError) {
+                            // Continue collecting a multi-line JSON array/object.
+                        }
+                    }
+                    if (!completed) parseError('右侧数组或对象没有完整结束，必须写成有效JSON', lineNumber);
+                }
+                variables[path] = parsedValue;
+            }
+            return variables;
+        };
+        let currentId = '';
+        let currentLines = [];
+        let hasIdSections = false;
+        lines.forEach((rawLine, index) => {
+            const text = rawLine.trim();
+            const lineNumber = index + 1;
+            if (!text) return;
+            const open = text.match(/^<id\s*=\s*([^>]+)>$/i);
+            const close = text.match(/^<\/id\s*=\s*([^>]+)>$/i);
+            if (open) {
+                if (currentId) parseError('不能嵌套模板ID区块', lineNumber);
+                if (!hasIdSections && currentLines.length) parseError('多个模板时所有变量都必须写在模板ID区块内', lineNumber);
+                currentId = open[1].trim();
+                if (!currentId) parseError('缺少模板ID', lineNumber);
+                currentLines = [];
+                hasIdSections = true;
+                return;
+            }
+            if (close) {
+                if (!currentId) parseError('出现了没有对应开始标签的模板ID结束标签', lineNumber);
+                if (close[1].trim() !== currentId) parseError(`模板ID结束标签不匹配，应为“</id=${currentId}>”`, lineNumber);
+                updates.push({ id: currentId, variables: parseVariableLines(currentLines, lineNumber) });
+                currentId = '';
+                currentLines = [];
+                return;
+            }
+            if (hasIdSections && !currentId) parseError('模板ID区块之间只能留空行', lineNumber);
+            currentLines.push({ text, lineNumber });
+        });
+        if (currentId) parseError(`缺少结束标签“</id=${currentId}>”`, lines.length || 1);
+        if (hasIdSections) return { updates };
+        return { updates: [{ id: '', variables: parseVariableLines(currentLines, 1) }] };
     };
 
     const normalizeUiTemplateUpdateList = (parsed, expectedTemplates = []) => {
         const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
         const issues = [];
-        let updates = [];
-        let inferredListField = '';
-
-        if (!isRecord(parsed)) {
-            issues.push('变量块不是有效的JSON对象');
-        } else if (Array.isArray(parsed.updates)) {
-            updates = parsed.updates;
-        } else {
-            const hasUpdatesField = Object.prototype.hasOwnProperty.call(parsed, 'updates');
-            if (hasUpdatesField) issues.push('外层“updates”不是数组');
-            const arrayFields = Object.entries(parsed).filter(([, value]) => Array.isArray(value));
-            if (arrayFields.length === 1) {
-                inferredListField = arrayFields[0][0];
-                updates = arrayFields[0][1];
-                issues.push(`外层字段“${inferredListField}”无效，应为“updates”`);
-            } else if (!hasUpdatesField) {
-                issues.push('缺少外层“updates”数组');
-            }
-        }
-        if (isRecord(parsed)) {
-            const unknownFields = Object.keys(parsed).filter(key => key !== 'updates' && key !== inferredListField);
-            if (unknownFields.length) issues.push(`外层包含未定义字段：${unknownFields.join('、')}`);
-        }
+        const updates = isRecord(parsed) && Array.isArray(parsed.updates) ? parsed.updates : [];
+        if (!isRecord(parsed) || !Array.isArray(parsed.updates)) issues.push('变量块缺少有效的更新分段');
 
         const templatesById = new Map(expectedTemplates.map(template => [String(template.id), template]));
         const receivedById = new Map();
@@ -1740,30 +1764,21 @@ ${content}
                 return;
             }
 
-            let variables = update.variables;
-            let inferredVariablesField = '';
+            const variables = update.variables;
             if (!Object.prototype.hasOwnProperty.call(update, 'variables')) {
-                const inferred = Object.entries(update).filter(([key, value]) => (
-                    !['id', 'name', 'reason'].includes(key) && value !== null && typeof value === 'object'
-                ));
-                if (inferred.length === 1) {
-                    inferredVariablesField = inferred[0][0];
-                    variables = inferred[0][1];
-                    issues.push(`${location}字段“${inferredVariablesField}”无效，应为“variables”`);
-                } else {
-                    issues.push(`${location}缺少“variables”`);
-                }
+                issues.push(`${location}缺少变量内容`);
             } else if (variables === null || typeof variables !== 'object') {
                 issues.push(`${location}的“variables”必须是对象或数组`);
             }
-            const unknownFields = Object.keys(update).filter(key => (
-                !['id', 'name', 'variables', 'reason'].includes(key) && key !== inferredVariablesField
-            ));
+            const unknownFields = Object.keys(update).filter(key => !['id', 'variables'].includes(key));
             if (unknownFields.length) issues.push(`${location}包含未定义字段：${unknownFields.join('、')}`);
 
-            const id = typeof update.id === 'string' ? update.id.trim() : '';
+            const explicitId = typeof update.id === 'string' ? update.id.trim() : '';
+            const id = explicitId || (expectedTemplates.length === 1 ? String(expectedTemplates[0].id) : '');
             if (!id) {
-                issues.push(`${location}缺少有效模板ID`);
+                issues.push(expectedTemplates.length > 1
+                    ? `${location}缺少模板ID；多个模板时不能使用无ID简化格式`
+                    : `${location}缺少有效模板ID`);
                 return;
             }
             if (!templatesById.has(id)) {
@@ -1806,12 +1821,32 @@ ${content}
                 .map(match => match[1]);
             const socialNodes = Array.isArray(variables.social_nodes) ? variables.social_nodes : currentVariables.social_nodes;
             const socialIds = new Set((Array.isArray(socialNodes) ? socialNodes : []).map(node => String(node?.id || '')));
+            Object.entries(variables).forEach(([path, value]) => {
+                const match = path.match(/^social_nodes(?:\.\d+|\[\d+\])\.id$/);
+                if (match && value !== undefined && value !== null && String(value).trim()) {
+                    socialIds.add(String(value).trim());
+                }
+            });
             const findExpectedPath = (expected, path) => {
                 let current = expected;
-                for (const part of splitUiTemplatePath(path)) {
+                let appendedArray = null;
+                const parts = splitUiTemplatePath(path);
+                for (let index = 0; index < parts.length; index += 1) {
+                    const part = parts[index];
+                    if (Array.isArray(current) && /^\d+$/.test(part) && Number(part) === current.length && current.length > 0) {
+                        appendedArray = current;
+                        current = current[0];
+                        continue;
+                    }
                     if ((!isRecord(current) && !Array.isArray(current)) || !Object.prototype.hasOwnProperty.call(current, part)) {
+                        if (index === parts.length - 1
+                            && appendedArray === currentVariables.social_nodes
+                            && ['id', 'name', 'relation', 'group', 'tags'].includes(part)) {
+                            return { found: true, value: undefined };
+                        }
                         return { found: false, value: undefined };
                     }
+                    appendedArray = null;
                     current = current[part];
                 }
                 return { found: true, value: current };
@@ -1865,13 +1900,12 @@ ${content}
         return updates;
     };
 
-    const applyUiTemplateUpdateListToTemplate = (template, updates, { model = '', turn = null, source = 'ai', matchName = true } = {}) => {
+    const applyUiTemplateUpdateListToTemplate = (template, updates, { model = '', turn = null, source = 'ai' } = {}) => {
         let fieldCount = 0;
         let changed = false;
         updates.forEach(update => {
             if (!template || !update || typeof update !== 'object') return;
             if (update.id && update.id !== template.id) return;
-            if (matchName && update.name && update.name !== template.name) return;
             if (update.variables === null || typeof update.variables !== 'object') return;
             const changes = {};
             const variableEntries = Array.isArray(update.variables)
@@ -1894,8 +1928,7 @@ ${content}
                     source,
                     model,
                     turn,
-                    changes,
-                    reason: update.reason || ''
+                    changes
                 });
                 template.changeLog = template.changeLog.slice(0, 50);
                 fieldCount += Object.keys(changes).length;
@@ -1906,7 +1939,6 @@ ${content}
     };
 
     window.RPHubUiTemplateUtils = {
-        UI_TEMPLATE_UPDATES_PATTERN,
         applyUiTemplateUpdateListToTemplate,
         buildExecutableHtmlDocument,
         cloneUiObject,
@@ -1917,7 +1949,7 @@ ${content}
         inferInitialUiTemplateState,
         normalizeUiTemplate,
         normalizeUiTemplateUpdateList,
-        parseUiTemplateUpdateJson,
+        parseUiTemplateUpdates,
         renderUiTemplateHtml,
         renderUiTemplateString,
         sanitizeUiTemplateImportEntry,

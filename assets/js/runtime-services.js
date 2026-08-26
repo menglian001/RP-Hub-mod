@@ -419,6 +419,13 @@
             const start = (tokenUsagePage.value - 1) * pageSize;
             return filteredTokenUsageHistory.value.slice(start, start + pageSize);
         });
+        const latestMainTokenUsage = computed(() => tokenUsageHistory.value.find(
+            record => record.type === 'chat' || record.type === 'tool_continuation'
+        ) || null);
+        const formatLatestTokenCount = value => `${(Number(value || 0) / 1000).toFixed(2)}k`;
+        const formatLatestUsageCost = quota => Number.isFinite(quota)
+            ? `¥${(Math.trunc(quota / 500000 * 10000) / 10000).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+            : '--';
 
         let saveQueue = Promise.resolve();
         const saveTokenUsageHistoryNow = () => {
@@ -493,6 +500,8 @@
             clearTokenUsageHistory,
             displayedTokenUsageHistory,
             filteredTokenUsageHistory,
+            formatLatestTokenCount,
+            formatLatestUsageCost,
             formatTokenAggregate: (value, reports) => {
                 if (reports <= 0 || value <= 0) return '0';
                 if (value >= 100000000) return `${Number((value / 100000000).toFixed(2))}亿`;
@@ -503,6 +512,7 @@
             formatTokenUsageTime: (timestamp) => new Date(timestamp).toLocaleString('zh-CN', { hour12: false }),
             getTokenUsageTypeLabel: (type) => ({ chat: '主对话', memory: '记忆系统', variables: '变量分析' })[getTokenUsageCategory(type)],
             getUncachedInputTokens,
+            latestMainTokenUsage,
             recordApiUsage,
             saveTokenUsageHistoryNow,
             showTokenUsageTimeFilter,

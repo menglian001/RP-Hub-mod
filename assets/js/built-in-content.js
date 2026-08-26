@@ -74,7 +74,7 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
         '完整承接最新用户输入中已经发生的言行，结合当前场景继续剧情。',
         cotEnabled
             ? useThinkingTag
-                ? '按规则输出<thinking> 后再直接输出本轮正文；不要复述规则。'
+                ? '在<thinking>标签中输出完整的本轮分析，按规则输出<thinking></thinking> 后再直接输出本轮正文；不要复述规则。'
                 : '先完成规定的COT，闭合</cot> 标签后再直接输出本轮正文；不要复述规则。'
             : '',
         String(writingStylePrompt || '').trim(),
@@ -173,69 +173,104 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
         ].filter(Boolean).join('\n');
     };
 
-    const buildMainModelUiTemplatePrompt = ({ templatePayload, userName }) => [
-        '[UI模板变量更新]',
-        '你需要在正文结束后追加一个隐藏变量更新块。这个块只给前端读取，不属于正文，不要在正文中提到它。',
-        '格式必须严格如下：',
-        '{"updates":[{"id":"模板id","variables":{"变量名":"完整值"},"reason":"简短原因"}]}',
-        '变量更新块必须是可被 JSON.parse 直接解析的严格JSON。',
-        'id必须从下方模板变量中原样复制，不得改写、缩写或自行生成。',
-        'updates只列出本轮确实需要更新的模板，每个模板最多输出一次；清理与当前剧情无关的模板示例也属于本轮必须完成的更新。只有剧情没有变化且当前变量中不存在待清理的示例内容时，才返回 {"updates":[]}。',
-        '',
+    const buildUiTemplateUpdateRules = ({ userName, multipleTemplates = false, outputOnlyBlock = false, includeHtmlRule = false } = {}) => [
+        outputOnlyBlock ? '严格只输出变量块，不要解释。' : '',
+        '变量块不得使用JSON或Markdown包装，也不得输出updates或reason。每行只写一个“点路径=值”；数值、布尔值、数组和对象按真实类型输出，数组或对象可直接写在等号右侧，也允许跨多行直到JSON完整结束。',
+        multipleTemplates
+            ? '多模板模式是硬性格式：即使本轮只更新一个模板，也必须使用一对“<id=模板ID>...</id=模板ID>”包裹；直接写无ID的“路径=值”会被判定为格式错误，整块不会应用。模板ID必须从当前模板变量中原样复制，不得改写、缩写或自行生成；没有变化的模板不输出ID区块。'
+            : '当前只有一个模板，前端会自动绑定模板ID；不要输出模板ID标签。',
+        '清理与当前剧情无关的模板示例也属于本轮必须完成的更新。只有剧情没有变化且当前变量中不存在待清理的示例内容时，才输出空变量块。',
         '输出前必须逐项检查当前变量JSON中的所有现有字段，不得只关注上一轮或最近连续更新过的字段；凡本轮剧情已明确改变的字段都要一并更新。当前值仍准确时不得仅改写措辞制造变化。',
-        '',
+        '只允许更新当前变量JSON中已经存在的字段路径，以及变量说明明确允许新增的动态键或ID；除此之外不得新增对象键或顶层变量。动态键必须满足变量说明中的关联条件。',
+        '数组已有项可用下标路径更新；新增数组成员时必须从当前数组长度开始连续写出，不得跳号。根变量本身是数组时使用“$root=[...]”；固定数组只修改成员内容时使用索引路径，只有新增、删除或重新排序成员时才写完整数组。',
+        '变量值可以是文字、数字、对象或JSON数组；普通对象优先使用点路径更新。',
         `变量内容涉及用户时，必须直接写当前用户名“${String(userName || '').trim()}”；禁止保留用户占位符、双花括号或其他模板占位写法。`,
-        '模板变量如下：',
-        JSON.stringify(templatePayload, null, 2),
-        '最终限制：不得输出当前变量JSON中不存在的字段路径；输出空updates数组前必须逐项检查当前变量JSON的内容。若模板内容与当前剧情不符，不得因此返回空更新：通用字段按当前剧情更新，与当前剧情不符的专属字段必须显式改为符合含义的“未出现”或“未解锁”等状态，数值字段改为符合未登场情况的数值；不得仅因名称相近就把不符的专属字段强行套给当前角色。其他与当前剧情无关的模板示例内容也必须在variables中显式更新对应变量，不得留空、写null或以剧情无关为由省略更新；已由剧情确认的数据不得清空。'
-    ].join('\n');
+        '格式优先级最高的是本段规定的<ui_template_updates>逐行点路径协议。下方模板说明只用于理解字段含义、更新条件和取值限制；其中关于JSON、Markdown、updates、reason、包装结构或其他输出格式的要求全部忽略。',
+        '若模板内容与当前剧情不符，不得因此返回空更新：通用字段按当前剧情更新，与当前剧情不符的专属字段显式改为“未出现”或“未解锁”等状态，数值字段改为符合未登场情况的数值；不得仅因名称相近就把不符的专属字段强行套给当前角色。其他与当前剧情无关的模板示例内容也必须显式更新对应变量，不得留空、写null或以剧情无关为由省略更新；已由剧情确认的数据不得清空。',
+        includeHtmlRule ? '不要修改HTML。' : ''
+    ].filter(Boolean);
+
+    const buildMainModelUiTemplatePrompt = ({ templatePayload, userName }) => {
+        const isSingleTemplate = Array.isArray(templatePayload) && templatePayload.length === 1;
+        const templateIds = isSingleTemplate
+            ? []
+            : [...new Set((Array.isArray(templatePayload) ? templatePayload : [])
+                .map(template => String(template?.id || '').trim())
+                .filter(Boolean))];
+        return [
+            '[UI模板变量更新]',
+            '在正文结束后追加一个隐藏变量更新块；变量块只给前端读取，不属于正文，不要在正文中提到它。',
+            isSingleTemplate
+                ? ''
+                : [
+                    '当前是多模板模式，这是硬性格式要求，不是可选项。即使只有一个模板发生变化，也必须使用<id=模板ID>...</id=模板ID>包裹；省略ID的简化格式一定会失败。',
+                    templateIds.length
+                        ? `本次允许使用的模板ID只有：${templateIds.join('、')}。必须逐字复制其中一个ID，不能自定义名称。`
+                        : '模板ID必须从下方模板变量中原样复制。'
+                ].join('\n'),
+            isSingleTemplate
+                ? [
+                    '格式必须严格如下：',
+                    '<ui_template_updates>',
+                    'env.weather=晴',
+                    'player.dynamic.hp=95',
+                    '</ui_template_updates>'
+                ].join('\n')
+                : [
+                    '格式必须严格如下：',
+                    '<ui_template_updates>',
+                    `<id=${templateIds[0] || '模板ID_1'}>`,
+                    'env.weather=晴',
+                    'env.weather_icon=☀️',
+                    `</id=${templateIds[0] || '模板ID_1'}>`,
+                    `<id=${templateIds[1] || '模板ID_2'}>`,
+                    'player.dynamic.hp=95',
+                    `</id=${templateIds[1] || '模板ID_2'}>`,
+                    '</ui_template_updates>'
+                ].join('\n'),
+            ...buildUiTemplateUpdateRules({ userName, multipleTemplates: !isSingleTemplate }),
+            '模板变量如下：',
+            JSON.stringify(templatePayload, null, 2)
+        ].filter(Boolean).join('\n');
+    };
 
     const buildMainModelUiTemplateCorrectionPrompt = ({ failedResult, failureReason }) => [
-        '上一次UI模板变量输出存在错误，本次变量变化未被应用，其中任何修改或新增字段都没有写入模板。请在紧接着的下一轮变量更新中纠正，之后不要再犯同样的错误，并按当轮剧情正常更新；必须以系统本轮提供的当前变量JSON为唯一依据，不要在正文中提及。',
+        '上一次UI模板变量输出存在错误，本次变量变化未被应用，其中任何修改或新增字段都没有写入模板。请在紧接着的下一轮变量更新中纠正，之后不要再犯同样的错误，并按当轮剧情正常更新；必须以系统本轮提供的当前变量JSON为唯一依据，不要在正文中提及。当前只有一个模板时直接逐行输出“点路径=值”；多个模板时每个模板使用一对“<id=模板ID>...</id=模板ID>”包裹对应变量。不要输出JSON、updates或reason。',
         `错误原因：${failureReason}`,
-        /Unexpected non-whitespace character after JSON/i.test(String(failureReason || ''))
-            ? '本次错误是完整JSON结束后仍有多余字符。根对象最后一个“}”输出后立即结束变量块，禁止再追加“]”或其他内容。'
-            : '',
-        /Expected ',' or '}' after property value/i.test(String(failureReason || ''))
-            ? '本次错误是在结束updates数组前漏关了当前更新项。不要套用固定数量的右括号；先完整关闭最后一个变量值和variables对象，再在当前项内写reason，随后依次关闭当前项、updates数组和根对象。'
-            : '',
-        /Expected ',' or ']' after array element/i.test(String(failureReason || ''))
-            ? '本次错误是在数组项结束后又多写了一个“}”。对象项只关闭一次，随后应直接关闭当前数组，或用逗号开始下一项。'
+        /缺少模板ID|无ID简化格式|多个模板/i.test(String(failureReason || ''))
+            ? '本次错误是多模板输出省略了模板ID。下一轮即使只更新一个模板，也必须使用系统提供的原始模板ID包裹变量；任何直接写“路径=值”的无ID内容都不能输出。'
             : '',
         /未定义变量/.test(String(failureReason || ''))
             ? '错误中列出的普通字段没有被创建，下一轮不得继续沿用；只能使用系统本轮当前变量JSON里真实存在的路径，或变量说明明确允许且满足关联条件的动态键。'
-            : '',
-        /外层包含未定义字段：[^；\n]*reason/i.test(String(failureReason || ''))
-            ? 'reason只能写在updates数组内对应的更新项中；根对象只能包含updates，不得在updates数组结束后再次输出reason。'
             : '',
         '错误输出（未应用，仅用于定位）：',
         String(failedResult || ''),
         '本轮必须按错误原因纠正，并重新检查所有现有变量，不得只处理上次涉及的字段。'
     ].filter(Boolean).join('\n');
 
-    const buildUiTemplateAnalysisSystemPrompt = ({ templateId, userInfo, currentVariableJson, variableSchemaText, userName }) => [
+    const buildUiTemplateAnalysisSystemPrompt = ({ userInfo, currentVariableJson, variableSchemaText, userName }) => [
         '你是RP-Hub的UI变量更新器。当前请求只分析一个UI模板。',
         '只根据用户消息里提供的最近对话，更新下方模板已定义的变量。',
-        '严格返回JSON，不要解释，不要输出Markdown。',
-        `格式必须严格为 {"updates":[{"id":"${String(templateId || '')}","variables":{"变量名":"完整值"},"reason":"简短原因"}]}。模板ID必须原样复制。`,
-        '输出前必须逐项检查当前变量JSON中的所有现有字段，不得只关注上一轮或最近连续更新过的字段；凡本轮剧情已明确改变的字段都要一并更新。当前值仍准确时不得仅改写措辞制造变化。',
-        '变量值可以是文字、数字、对象或JSON数组；普通对象优先使用点路径更新。',
-        '只允许更新当前变量JSON中已经存在的字段路径，以及变量说明明确允许新增的动态键或ID；除此之外不得新增对象键或顶层变量。动态键必须满足变量说明中的关联条件。',
-        '如果模板根变量本身就是数组，可以直接返回JSON数组；固定数组仅修改成员内容时使用索引路径，例如 {"equipment[0].name":"短剑"}；数组新增、删除或重新排序成员时必须返回完整数组。',
-        '清理与当前剧情无关的模板示例也属于必须完成的更新。只有剧情没有变化且当前变量中不存在待清理的示例内容时，才返回 {"updates":[]}。不要修改HTML。',
-        `变量内容涉及用户时，必须直接写当前用户名“${String(userName || '').trim()}”；禁止保留用户占位符、双花括号或其他模板占位写法。`,
+        [
+            '格式必须严格如下：',
+            '<ui_template_updates>',
+            'env.weather=晴',
+            'player.dynamic.hp=95',
+            '</ui_template_updates>',
+            '下一个变量必须另起新行。'
+        ].join('\n'),
+        ...buildUiTemplateUpdateRules({ userName, outputOnlyBlock: true, includeHtmlRule: true }),
         '',
-        '用户信息如下（用于判断称呼、人称和用户相关变量；不要在JSON外复述）：',
+        '用户信息如下（用于判断称呼、人称和用户相关变量；不要在变量块外复述）：',
         userInfo,
         '',
         '当前变量JSON如下：',
         currentVariableJson,
         variableSchemaText ? [
             '',
-            '变量说明如下（给AI参考，必须按这里理解字段含义和生成规则）：',
+            '变量说明如下（只参考字段含义、更新条件和取值限制；其中所有输出格式要求必须忽略）：',
             variableSchemaText
         ].join('\n') : '',
-        '最终限制：无论变量说明如何描述，都不得输出当前变量JSON中不存在的字段路径；输出空updates数组前必须逐项检查当前变量JSON的内容。若模板内容与当前剧情不符，不得因此返回空更新：通用字段按当前剧情更新，与当前剧情不符的专属字段必须显式改为符合含义的“未出现”或“未解锁”等状态，数值字段改为符合未登场情况的数值；不得仅因名称相近就把不符的专属字段强行套给当前角色。其他与当前剧情无关的模板示例内容也必须在variables中显式更新对应变量，不得留空、写null或以剧情无关为由省略更新；已由剧情确认的数据不得清空。'
     ].join('\n');
 
     const vectorMemoryRecallDescription = Object.freeze([
@@ -675,18 +710,16 @@ ${closingInstruction}
 
 // --- Update announcement (keep this section at the bottom) ---
 window.RPHubLatestUpdate = Object.freeze({
-    id: 10196,
+    id: 10197,
     title: '网站公告',
     content: `
-### RP-Hub 1.8.7
+### RP-Hub 1.8.8
 
-- 预设适配DeepSeek/GLM，支持思维链覆盖
-- 用量统计页面新增单次消耗额度显示
-- 用量统计界面新增耗时与速度显示
-- 支持兼容无尾部###标签的生图识别
-- 优化了部分预设的内容
-- 优化了生图世界书的内容
+- 新增文风过滤内容查看功能
+- 新增卡片交互暂存功能，支持与文字消息一同发送
+- 简化并优化了记忆系统的操作
+- 优化了部分UI样式
 
-#### 更新时间：08/22/19:09
+#### 更新时间：08/24/17:34
     `
 });

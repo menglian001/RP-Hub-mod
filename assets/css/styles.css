@@ -926,6 +926,43 @@
             transform: scale(0.94);
         }
 
+        .message-style-filter-button {
+            display: inline-flex;
+            height: 1.625rem;
+            flex: none;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0 0.5rem;
+            border: 0;
+            border-radius: 9999px;
+            background: transparent;
+            color: rgba(75, 85, 99, 0.82);
+            font-size: 0.625rem;
+            font-weight: 700;
+            white-space: nowrap;
+            transition: color 0.18s ease, background-color 0.18s ease, transform 0.18s ease;
+        }
+
+        .message-style-filter-button.is-active {
+            color: #2563eb;
+            background: rgba(255, 255, 255, 0.78);
+            outline: none;
+        }
+
+        .message-style-filter-button:active {
+            transform: scale(0.97);
+        }
+
+        .message-style-filter-popover {
+            max-width: calc(100vw - 1.5rem);
+        }
+
+        @media (max-width: 767px) {
+            .message-style-filter-popover {
+                transform: translateX(-65%);
+            }
+        }
+
         .message-action-button--danger:hover {
             color: #dc2626;
             background: rgba(254, 242, 242, 0.82);
@@ -1349,6 +1386,10 @@
         @media (min-width: 768px) {
             .message-action-button {
                 width: 1.875rem;
+                height: 1.75rem;
+            }
+
+            .message-style-filter-button {
                 height: 1.75rem;
             }
 
