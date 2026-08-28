@@ -175,17 +175,48 @@
 
 // --- Message renderer ---
 (function () {
-    const MAX_CACHE_SIZE = 2000;
+    // 缓存 key 是整条正文，所以只按「条数」淘汰是不安全的：
+    // 流式期间 msg.content 每 STREAM_RENDER_INTERVAL 变一次，每帧都是一个全新 key，
+    // 旧上限 2000 条会让缓存稳定攥着 2000 条最长的中间快照（实测 30~50MB），
+    // 在 Android WebView 里直接把渲染进程的堆压垮 —— 表现就是先卡死再闪退。
+    // 改成同时受「条数」和「字符预算」约束，并且流式消息根本不写缓存。
+    const MAX_CACHE_ENTRIES = 400;
+    const MAX_CACHE_CHARS = 2 * 1024 * 1024; // ≈4MB UTF-16
+
+    const createBoundedCache = () => {
+        const map = new Map();
+        let chars = 0;
+        const weigh = (key, value) => key.length + (typeof value === 'string' ? value.length : 8);
+        return {
+            has: (key) => map.has(key),
+            get: (key) => map.get(key),
+            set(key, value) {
+                if (map.has(key)) chars -= weigh(key, map.get(key));
+                map.set(key, value);
+                chars += weigh(key, value);
+                while (map.size > 1 && (map.size > MAX_CACHE_ENTRIES || chars > MAX_CACHE_CHARS)) {
+                    const oldestKey = map.keys().next().value;
+                    // 刚写入的那条不淘汰，否则单条超预算时缓存会永远空转
+                    if (oldestKey === key) break;
+                    chars -= weigh(oldestKey, map.get(oldestKey));
+                    map.delete(oldestKey);
+                }
+                return value;
+            },
+            clear() {
+                map.clear();
+                chars = 0;
+            },
+            get size() { return map.size; },
+            get chars() { return chars; }
+        };
+    };
 
     const createMessageRenderer = ({ processRegex, replaceUserPlaceholder, createExecutableHtmlIframe, marked, DOMPurify }) => {
-        const renderedCache = new Map();
-        const frameDetectionCache = new Map();
+        const renderedCache = createBoundedCache();
+        const frameDetectionCache = createBoundedCache();
 
-        const cacheValue = (cache, key, value) => {
-            cache.set(key, value);
-            if (cache.size > MAX_CACHE_SIZE) cache.delete(cache.keys().next().value);
-            return value;
-        };
+        const cacheValue = (cache, key, value) => (key === null ? value : cache.set(key, value));
 
         const clearCaches = () => {
             renderedCache.clear();
@@ -197,10 +228,10 @@
             return skipRegex ? replaced : processRegex(replaced, { isDisplay: true, role });
         };
 
-        const contentUsesHtmlFrame = (text, role = 'assistant', skipRegex = false) => {
+        const contentUsesHtmlFrame = (text, role = 'assistant', skipRegex = false, { cache = true } = {}) => {
             if (!text) return false;
-            const cacheKey = `${role}_${skipRegex}_${text}`;
-            if (frameDetectionCache.has(cacheKey)) return frameDetectionCache.get(cacheKey);
+            const cacheKey = cache ? `${role}_${skipRegex}_${text}` : null;
+            if (cacheKey !== null && frameDetectionCache.has(cacheKey)) return frameDetectionCache.get(cacheKey);
 
             const trimmed = applyDisplayRegex(text, role, skipRegex).trim();
             let usesFrame = false;
@@ -269,10 +300,10 @@
             return modified;
         };
 
-        const renderMarkdown = (text, role = 'assistant', skipRegex = false) => {
+        const renderMarkdown = (text, role = 'assistant', skipRegex = false, { cache = true } = {}) => {
             if (!text) return '';
-            const cacheKey = `${role}_${skipRegex}_${text}`;
-            if (renderedCache.has(cacheKey)) return renderedCache.get(cacheKey);
+            const cacheKey = cache ? `${role}_${skipRegex}_${text}` : null;
+            if (cacheKey !== null && renderedCache.has(cacheKey)) return renderedCache.get(cacheKey);
 
             let processed = applyDisplayRegex(text, role, skipRegex);
             const trimmed = processed.trim();

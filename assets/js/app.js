@@ -4191,11 +4191,22 @@ const app = createApp({
             clearMessageRenderCaches();
         }, { deep: true });
 
+        // 正在流式接收的那条消息，正文每 STREAM_RENDER_INTERVAL 就变一次，
+        // 缓存 key 是整条正文 => 每一帧写进去的条目都永远不会再被命中。
+        // 让它跳过缓存，避免把渲染进程的堆灌满（Android WebView 上会先卡死再被系统杀掉）。
+        const isStreamingMessage = (msg) => (
+            !!msg
+            && (isGenerating.value || isRemoteGenerating.value)
+            && chatHistory.value[chatHistory.value.length - 1] === msg
+        );
+        const renderOptionsFor = (msg) => (isStreamingMessage(msg) ? { cache: false } : undefined);
+
         const messageUsesHtmlFrame = (msg) => {
             if (!msg || !msg.content) return false;
-            if (msg.isTriggered) return msg.showRaw && contentUsesHtmlFrame(msg.content, msg.role);
+            const options = renderOptionsFor(msg);
+            if (msg.isTriggered) return msg.showRaw && contentUsesHtmlFrame(msg.content, msg.role, false, options);
             const parsed = parseCot(msg.content);
-            return contentUsesHtmlFrame(parsed.main || msg.content, msg.role);
+            return contentUsesHtmlFrame(parsed.main || msg.content, msg.role, false, options);
         };
 
         const messageHasUiTemplateBlocks = (msg) => {

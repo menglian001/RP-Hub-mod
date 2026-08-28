@@ -15,7 +15,29 @@ const generateUUID = () => {
     });
 };
 
+// parseCotCache 的 key 也是整条正文，而模板里每条消息每帧要调用 parseCot 六次，
+// 所以缓存必须留着（同帧内命中率极高），但不能只按条数封顶：
+// 流式每帧一个新 key，2000 条上限等于攥着 2000 条最长快照。改成字符预算。
+const PARSE_COT_MAX_ENTRIES = 400;
+const PARSE_COT_MAX_CHARS = 2 * 1024 * 1024; // ≈4MB UTF-16
 const parseCotCache = new Map();
+let parseCotCacheChars = 0;
+const parseCotCacheWeigh = (key, value) => (
+    key.length + (value ? value.cot.length + value.main.length + value.sys.length : 0)
+);
+const rememberParseCot = (key, value) => {
+    if (parseCotCache.has(key)) parseCotCacheChars -= parseCotCacheWeigh(key, parseCotCache.get(key));
+    parseCotCache.set(key, value);
+    parseCotCacheChars += parseCotCacheWeigh(key, value);
+    while (parseCotCache.size > 1
+        && (parseCotCache.size > PARSE_COT_MAX_ENTRIES || parseCotCacheChars > PARSE_COT_MAX_CHARS)) {
+        const oldestKey = parseCotCache.keys().next().value;
+        if (oldestKey === key) break;
+        parseCotCacheChars -= parseCotCacheWeigh(oldestKey, parseCotCache.get(oldestKey));
+        parseCotCache.delete(oldestKey);
+    }
+    return value;
+};
 const parseCot = (text) => {
     if (!text) return { cot: '', main: '', sys: '', isFinished: false };
     if (parseCotCache.has(text)) return parseCotCache.get(text);
@@ -54,13 +76,7 @@ const parseCot = (text) => {
     }
 
     const result = { cot: cotContent.trim(), main: mainContent.trim(), sys: sys, isFinished };
-    parseCotCache.set(text, result);
-    // Limit cache size to prevent memory leaks in extremely long sessions
-    if (parseCotCache.size > 2000) {
-        const firstKey = parseCotCache.keys().next().value;
-        parseCotCache.delete(firstKey);
-    }
-    return result;
+    return rememberParseCot(text, result);
 };
 
 const compressImage = (source, maxWidth = 300, quality = 0.7) => new Promise((resolve) => {
