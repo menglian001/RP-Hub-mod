@@ -569,6 +569,7 @@
         getStorageLogicalKey,
         globalUiTemplates,
         memorySettings,
+        pruneChatImages,
         readStorageKeys,
         saveMemorySettings,
         saveStoredValue,
@@ -618,6 +619,9 @@
         const getStorageCategory = (logicalKey) => {
             if (logicalKey === 'characters') return 'characters';
             if (logicalKey.startsWith('chat_')) return 'chat';
+            // 外置的聊天图片也算聊天记录的一部分，否则用户会在「其他」里
+            // 看到一大坨说不清来源的占用。
+            if (logicalKey.startsWith('chatimg_')) return 'chat';
             if (logicalKey.startsWith('memories_')) return 'vector';
             if (logicalKey.startsWith('classic_memories_')) return 'classic';
             return 'other';
@@ -779,6 +783,10 @@
                             saveMemorySettings(),
                             saveStoredValue('global_ui_templates', globalUiTemplates.value)
                         ]);
+                        // chatimg_ 键不在 scopedStorageNames 里（故意的：图片按内容
+                        // 哈希跨会话共享，不能按 scope 判定孤儿），所以通用清理路径
+                        // 不会碰它，必须显式扫一遍引用回收。
+                        await pruneChatImages?.().catch(error => console.warn('Prune chat images failed:', error));
                         await refreshStorageStats();
                         toast(`已清理 ${orphanedItems} 项无用残留，约 ${formatStorageSize(orphanedBytes)}`, 'success');
                     } catch (error) {

@@ -190,9 +190,191 @@
         return value;
     };
 
+    // --- 聊天图片外置 ---
+    // 图片以 base64 dataUrl 存在消息里时，一张 1600px 的 JPEG 约 640KB 字符
+    // （JS 内存里按 UTF-16 算约 1.25MB）。而 saveChatHistoryNow 每次都要
+    // cloneForStorage 深拷贝整份 chatHistory，生成期间节流仅 1.5 秒 ——
+    // 20 张图的会话等于每 1.5 秒申请 25MB 临时对象，Android WebView 上
+    // 直接把渲染进程的堆推到 OOM（先卡死，再被系统杀掉）。
+    // 这里把图片挪到独立的 rp_hub_chatimg_<hash> 键，消息里只留短 ref。
+    const CHAT_IMAGE_PREFIX = 'chatimg_';
+    const CHAT_IMAGE_REF_SCHEME = 'chatimg:';
+    const knownChatImageRefs = new Set();
+
+    const hashChatImage = async (dataUrl) => {
+        const text = String(dataUrl || '');
+        try {
+            if (crypto?.subtle?.digest) {
+                const bytes = new TextEncoder().encode(text);
+                const digest = await crypto.subtle.digest('SHA-256', bytes);
+                const hex = Array.from(new Uint8Array(digest).slice(0, 16))
+                    .map(byte => byte.toString(16).padStart(2, '0'))
+                    .join('');
+                return `${hex}_${text.length}`;
+            }
+        } catch (error) {
+            console.warn('crypto.subtle unavailable, falling back to djb2:', error);
+        }
+        // 退路：djb2。带上长度一起做 key，进一步压低碰撞概率。
+        let hash = 5381;
+        for (let index = 0; index < text.length; index++) {
+            hash = ((hash << 5) + hash + text.charCodeAt(index)) | 0;
+        }
+        return `${(hash >>> 0).toString(16)}_${text.length}`;
+    };
+
+    const chatImageKey = (hash) => `${STORAGE_PREFIX}${CHAT_IMAGE_PREFIX}${hash}`;
+    const isChatImageRef = (value) => typeof value === 'string' && value.startsWith(CHAT_IMAGE_REF_SCHEME);
+    const chatImageRefToHash = (ref) => String(ref).slice(CHAT_IMAGE_REF_SCHEME.length);
+
+    const putChatImage = async (dataUrl) => {
+        const hash = await hashChatImage(dataUrl);
+        const ref = `${CHAT_IMAGE_REF_SCHEME}${hash}`;
+        // 内容哈希做 key，同一张图重复出现（重发、复制分支）只落一份。
+        if (knownChatImageRefs.has(ref)) return ref;
+        const key = chatImageKey(hash);
+        if (await dbGet(key) === undefined) {
+            await dbSet(key, String(dataUrl), { clone: false });
+        }
+        knownChatImageRefs.add(ref);
+        return ref;
+    };
+
+    const getChatImage = async (ref) => {
+        if (!isChatImageRef(ref)) return undefined;
+        const value = await dbGet(chatImageKey(chatImageRefToHash(ref)));
+        if (value !== undefined) knownChatImageRefs.add(ref);
+        return value;
+    };
+
+    // 第一段：**同步**摘图，只搬字符串引用（字符串不可变，零复制成本）。
+    // pending 里记的是 (消息下标, 附件下标)，因为随后要把 imageRef 补进
+    // 深拷贝出来的那一份，而不是这里的浅拷贝。
+    const detachChatImages = (history) => {
+        const messages = Array.isArray(history) ? history : [];
+        const pending = [];
+        const snapshot = messages.map((message, messageIndex) => {
+            const attachments = message?.imageAttachments;
+            if (!Array.isArray(attachments) || attachments.length === 0) return message;
+            const mapped = attachments.map((attachment, attachmentIndex) => {
+                if (!attachment || typeof attachment !== 'object') return attachment;
+                const dataUrl = attachment.dataUrl;
+                if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return attachment;
+                const slim = { ...attachment };
+                delete slim.dataUrl;
+                pending.push({ messageIndex, attachmentIndex, dataUrl });
+                return slim;
+            });
+            return { ...message, imageAttachments: mapped };
+        });
+        return { snapshot, pending };
+    };
+
+    // 读回来：imageRef -> dataUrl。旧数据只有内联 dataUrl，原样可用。
+    const hydrateChatImages = async (history) => {
+        const messages = Array.isArray(history) ? history : [];
+        return Promise.all(messages.map(async (message) => {
+            const attachments = message?.imageAttachments;
+            if (!Array.isArray(attachments) || attachments.length === 0) return message;
+            const mapped = await Promise.all(attachments.map(async (attachment) => {
+                if (!attachment || typeof attachment !== 'object') return attachment;
+                if (typeof attachment.dataUrl === 'string' && attachment.dataUrl) return attachment;
+                if (!isChatImageRef(attachment.imageRef)) return attachment;
+                try {
+                    const dataUrl = await getChatImage(attachment.imageRef);
+                    if (typeof dataUrl !== 'string' || !dataUrl) return attachment;
+                    return { ...attachment, dataUrl };
+                } catch (error) {
+                    console.warn('Failed to load chat image:', error);
+                    return attachment;
+                }
+            }));
+            return { ...message, imageAttachments: mapped };
+        }));
+    };
+
+    // 同步摘图 + 同步 deep clone，拿到一份不含 base64 的独立快照；
+    // 图片本体的哈希与落库放到 commit 里异步做。
+    //
+    // clone 必须留在同步阶段：消息对象是被**原地改写**的（流式
+    // `message.content += text`），如果等到 await 之后才 clone，
+    // 中途的改动会漏进这次提交，原来 cloneForStorage(history) 的
+    // 快照语义就没了。而摘图之后 clone 的是短 ref，不再是 640KB 的 base64，
+    // 所以这一步很便宜 —— 这正是本次修复的关键。
+    const prepareChatHistoryWrite = (scopeId, history) => {
+        const { snapshot, pending } = detachChatImages(history);
+        const cloned = cloneForStorage(snapshot);
+        const key = scopedStorageKey('chat', scopeId);
+        return async () => {
+            for (const item of pending) {
+                const target = cloned?.[item.messageIndex]?.imageAttachments?.[item.attachmentIndex];
+                if (!target || typeof target !== 'object') continue;
+                try {
+                    target.imageRef = await putChatImage(item.dataUrl);
+                } catch (error) {
+                    // 落库失败就退回内联，宁可占内存也不能丢图。
+                    console.warn('Failed to externalize chat image, keeping inline:', error);
+                    target.dataUrl = item.dataUrl;
+                }
+            }
+            return dbSet(key, cloned, { clone: false });
+        };
+    };
+
+    const setChatHistory = (scopeId, history) => prepareChatHistoryWrite(scopeId, history)();
+
+    const getChatHistory = async (scopeId) => {
+        const stored = await dbGetWithLegacy(
+            scopedStorageKey('chat', scopeId),
+            legacyScopedStorageKey('chat', scopeId)
+        );
+        if (!Array.isArray(stored)) return stored;
+        return hydrateChatImages(stored);
+    };
+
+    // 图片按内容哈希共享，所以删一条会话不能直接删图 —— 必须全库扫一遍
+    // 还有谁在引用。开销不小，只在删角色/删分支/存储清理这种低频路径上跑。
+    const collectUsedChatImageRefs = async (targetDb) => {
+        const used = new Set();
+        await scanStorageEntries(targetDb, null, (_source, key, value) => {
+            if (!key.includes('_chat_') && !key.endsWith('_chat')) return;
+            if (!Array.isArray(value)) return;
+            value.forEach(message => {
+                const attachments = message?.imageAttachments;
+                if (!Array.isArray(attachments)) return;
+                attachments.forEach(attachment => {
+                    if (isChatImageRef(attachment?.imageRef)) used.add(attachment.imageRef);
+                });
+            });
+        });
+        return used;
+    };
+
+    const pruneChatImages = async () => {
+        if (!mainDb) await initDB();
+        const used = await collectUsedChatImageRefs(mainDb);
+        const keys = await readStorageKeys(mainDb);
+        const imagePrefix = `${STORAGE_PREFIX}${CHAT_IMAGE_PREFIX}`;
+        const orphans = keys.filter(key => {
+            if (!key.startsWith(imagePrefix)) return false;
+            return !used.has(`${CHAT_IMAGE_REF_SCHEME}${key.slice(imagePrefix.length)}`);
+        });
+        if (orphans.length) {
+            await deleteStorageKeys(mainDb, orphans);
+            orphans.forEach(key => {
+                knownChatImageRefs.delete(`${CHAT_IMAGE_REF_SCHEME}${key.slice(imagePrefix.length)}`);
+            });
+        }
+        return orphans.length;
+    };
+
     window.RPHubStorage = Object.freeze({
         cloneForStorage,
         deleteScopedStoredValue: (name, id) => dbDeleteWithLegacy(scopedStorageKey(name, id), legacyScopedStorageKey(name, id)),
+        getChatHistory,
+        setChatHistory,
+        prepareChatHistoryWrite,
+        pruneChatImages,
         deleteStorageKeys,
         deleteStoredValue: (name) => dbDeleteWithLegacy(storageKey(name), legacyStorageKey(name)),
         getLegacyDb: () => legacyDb,

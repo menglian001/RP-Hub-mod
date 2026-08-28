@@ -122,6 +122,7 @@ const {
     deleteScopedStoredValue,
     deleteStorageKeys,
     deleteStoredValue,
+    getChatHistory,
     getLegacyDb,
     getMainDb,
     getScopedStoredValue,
@@ -129,8 +130,11 @@ const {
     getStorageLogicalKey,
     initDB,
     isDatabaseClosingError,
+    prepareChatHistoryWrite,
+    pruneChatImages,
     readStorageKeys,
     scanStorageEntries,
+    setChatHistory,
     setScopedStoredValue,
     setStoredValue,
     unwrapForStorage
@@ -1815,6 +1819,7 @@ const app = createApp({
             getStorageLogicalKey,
             globalUiTemplates,
             memorySettings,
+            pruneChatImages,
             readStorageKeys,
             saveMemorySettings: () => saveMemorySettingsNow(),
             saveStoredValue: setStoredValue,
@@ -1957,13 +1962,16 @@ const app = createApp({
             if (!storyScopeId) return Promise.resolve(false);
 
             try {
-                const historyToSave = cloneForStorage(history);
+                // 同步摘出图片（只搬字符串引用，不复制 base64），拿到不含图片的
+                // 原子快照；图片本体在 commit 里异步落库。这样每次保存不再
+                // 深拷贝几十 MB 的 dataUrl —— 那是 WebView 渲染进程 OOM 的主因。
+                const commitChatHistory = prepareChatHistoryWrite(storyScopeId, history);
                 const saveTask = async () => {
                     let lastError = null;
                     for (let attempt = 1; attempt <= 3; attempt++) {
                         try {
                             if (!getMainDb()) await initDB();
-                            await setScopedStoredValue('chat', storyScopeId, historyToSave, { clone: false });
+                            await commitChatHistory();
                             return true;
                         } catch (error) {
                             lastError = error;
@@ -9913,6 +9921,9 @@ const app = createApp({
             const ids = [...new Set([char?.uuid, legacyIndex, ...allBranchScopeIds].filter(id => id !== undefined && id !== null))];
             await Promise.all(ids.flatMap(id => CHARACTER_SCOPED_STORAGE_NAMES
                 .map(name => deleteScopedStoredValue(name, id))));
+            // 聊天图片按内容哈希在多个会话间共享，所以删会话不能直接删图，
+            // 这里全库扫一遍回收没人引用的。失败不影响删除本身。
+            await pruneChatImages().catch(error => console.warn('Prune chat images failed:', error));
 
             if (!char?.uuid) return;
             // 图库存储已随 CHARACTER_SCOPED_STORAGE_NAMES 一起清掉，这里只重置内存状态
@@ -10212,7 +10223,7 @@ const app = createApp({
             let lastError = null;
             for (let attempt = 1; attempt <= 3; attempt++) {
                 try {
-                    return await getScopedStoredValue('chat', id);
+                    return await getChatHistory(id);
                 } catch (error) {
                     lastError = error;
                     if (attempt === 3 || !isRetryableChatStorageError(error)) throw error;
@@ -10414,6 +10425,7 @@ const app = createApp({
                             deleteScopedStoredValue('memories', scopeId),
                             deleteScopedStoredValue('classic_memories', scopeId)
                         ]);
+                        await pruneChatImages().catch(error => console.warn('Prune chat images failed:', error));
                         delete memorySettings.emptyTurns?.[getMemoryEmptyTurnsKey(scopeId)];
                         getUiTemplatesForRuntime(char).forEach(template => {
                             if (!template.runtimeByCharacter) return;
@@ -10497,7 +10509,7 @@ const app = createApp({
                 const floorCount = getPostprocessedChatMessages(sourceChatHistory, { includeSystem: false }).length;
                 const wordCount = getConversationBodyLength(sourceChatHistory);
 
-                await setScopedStoredValue('chat', branchScopeId, cloneForStorage(sourceChatHistory), { clone: false });
+                await setChatHistory(branchScopeId, sourceChatHistory);
                 await setScopedStoredValue('memories', branchScopeId, cloneForStorage(branchMemories), { clone: false });
                 await setScopedStoredValue('classic_memories', branchScopeId, cloneForStorage(branchClassicMemories), { clone: false });
 
@@ -10570,7 +10582,9 @@ const app = createApp({
                     });
                     loadGlobalUiTemplateRuntimeForCharacter(char);
                     await Promise.allSettled([
-                        deleteScopedStoredValue('chat', createdBranch.branchScopeId),
+                        deleteScopedStoredValue('chat', createdBranch.branchScopeId)
+                            .then(() => pruneChatImages())
+                            .catch(error => console.warn('Prune chat images failed:', error)),
                         deleteScopedStoredValue('memories', createdBranch.branchScopeId),
                         deleteScopedStoredValue('classic_memories', createdBranch.branchScopeId),
                         saveStoryBranchesForCharacter(char),
@@ -10975,11 +10989,9 @@ const app = createApp({
                             if (!await stopCurrentCharacterWork()) return;
                             if (!getMainDb()) await initDB();
                             await Promise.all([
-                                ...importedBranches.map(branch => setScopedStoredValue(
-                                    'chat',
+                                ...importedBranches.map(branch => setChatHistory(
                                     getStoryBranchScopeId(char.uuid, branch.id),
-                                    chatByBranch.get(branch.id),
-                                    { clone: false }
+                                    chatByBranch.get(branch.id)
                                 )),
                                 setScopedStoredValue('branches', char.uuid, {
                                     version: 1,
@@ -11016,7 +11028,7 @@ const app = createApp({
                         if (!await stopCurrentCharacterWork()) return;
                         _isApplyingCharacterScopedData = true;
                         chatHistory.value = prepareLoadedChatHistoryForDisplay(importedChat);
-                        await setScopedStoredValue('chat', getCurrentStoryBranchScopeId(), importedChat, { clone: false });
+                        await setChatHistory(getCurrentStoryBranchScopeId(), importedChat);
                         updateCurrentStoryBranchSummary();
                         await saveStoryBranchesForCharacter(char);
                         finishApplyingCharacterScopedData();
@@ -11102,10 +11114,12 @@ const app = createApp({
                     if (isCurrentCharacter && branch.id === activeStoryBranchId.value) {
                         messages = cloneForStorage(chatHistory.value);
                     } else if (char.uuid) {
-                        messages = await getScopedStoredValue('chat', getStoryBranchScopeId(char.uuid, branch.id));
+                        // 走 getChatHistory 而不是裸读：图片已外置成 imageRef，
+                        // 导出必须还原回 dataUrl，否则存档里的图片全丢。
+                        messages = await getChatHistory(getStoryBranchScopeId(char.uuid, branch.id));
                     }
                     if (messages === undefined && branch.id === STORY_BRANCH_MAIN_ID) {
-                        messages = await getScopedStoredValue('chat', index);
+                        messages = await getChatHistory(index);
                     }
                     return {
                         branchId: branch.id,
