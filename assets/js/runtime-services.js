@@ -55,6 +55,9 @@
     };
 
     const STREAM_RENDER_INTERVAL = 60;
+    // 渲染慢于出字时的退避上限：一次 flush 花了多久，下一次就至少等这么久，
+    // 但不超过这个值，否则弱机上会显得「一段一段地蹦」。
+    const STREAM_RENDER_MAX_INTERVAL = 500;
 
     const readStreamingResponse = async (response, onDelta) => {
         const reader = response.body.getReader();
@@ -63,17 +66,68 @@
         let usage = null;
         let pendingContent = '';
         let pendingReasoning = '';
-        let flushPromise = Promise.resolve();
 
-        const flushPending = () => {
-            if (!pendingContent && !pendingReasoning) return;
+        // 背压。原来是 setInterval 无条件触发 + flushPromise.then 串行排队：
+        // 一旦 onDelta（整条消息重渲染）超过 STREAM_RENDER_INTERVAL，
+        // Promise 链只会越排越长，UI 越落后越多，直到 finally 里 await 把积压
+        // 一次性放出来 —— 用户看到的「突然卡住」就是这个。
+        // 改成自调度：上一帧没渲染完就不排新的（内容继续累积，下一次一起渲染，
+        // 天然合并），并按实测耗时退避，让频率自动适配设备性能。
+        //
+        // 没用 requestAnimationFrame：页面切到后台时 rAF 完全停摆，流式内容会
+        // 一直堆到回前台才渲染，对套壳 App 是更糟的表现。
+        let activeFlush = null;
+        let flushError = null;
+        let flushTimer = null;
+        let stopped = false;
+
+        const runFlush = () => {
+            if (!pendingContent && !pendingReasoning) return null;
             const delta = { content: pendingContent, reasoning: pendingReasoning };
             pendingContent = '';
             pendingReasoning = '';
-            flushPromise = flushPromise.then(() => onDelta?.(delta));
+            const startedAt = Date.now();
+            return Promise.resolve()
+                .then(() => onDelta?.(delta))
+                .then(() => Date.now() - startedAt);
         };
 
-        const flushInterval = setInterval(flushPending, STREAM_RENDER_INTERVAL);
+        const scheduleFlush = (delay) => {
+            if (stopped || flushTimer !== null) return;
+            flushTimer = setTimeout(onFlushTick, delay);
+        };
+
+        const onFlushTick = () => {
+            flushTimer = null;
+            if (stopped) return;
+            // 上一帧还在渲染 —— 直接跳过，不排队
+            if (activeFlush) {
+                scheduleFlush(STREAM_RENDER_INTERVAL);
+                return;
+            }
+            const pending = runFlush();
+            if (!pending) {
+                scheduleFlush(STREAM_RENDER_INTERVAL);
+                return;
+            }
+            activeFlush = pending.then(
+                (elapsed) => {
+                    activeFlush = null;
+                    scheduleFlush(Math.min(
+                        Math.max(STREAM_RENDER_INTERVAL, elapsed),
+                        STREAM_RENDER_MAX_INTERVAL
+                    ));
+                },
+                (error) => {
+                    activeFlush = null;
+                    // 保留第一个错误，语义与原来 await flushPromise 抛出一致
+                    if (!flushError) flushError = error;
+                    scheduleFlush(STREAM_RENDER_INTERVAL);
+                }
+            );
+        };
+
+        scheduleFlush(STREAM_RENDER_INTERVAL);
 
         try {
             while (true) {
@@ -101,9 +155,16 @@
             }
             return { content: '', reasoning: '', usage };
         } finally {
-            clearInterval(flushInterval);
-            flushPending();
-            await flushPromise;
+            stopped = true;
+            if (flushTimer !== null) {
+                clearTimeout(flushTimer);
+                flushTimer = null;
+            }
+            if (activeFlush) await activeFlush;
+            // 收尾：把剩下的一次性渲染完。此时不再有后续 chunk，不存在积压问题。
+            const finalFlush = runFlush();
+            if (finalFlush) await finalFlush;
+            if (flushError) throw flushError;
         }
     };
 
