@@ -6,7 +6,12 @@
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content, viewport-fit=cover">
     <!-- <meta name="rphub-presence-api" content="https://rphub-presence.zeabur.app"> -->
-    <meta name="rphub-update-api" content="https://rphub-presence.zeabur.app">
+    <!-- 二改：不再查询上游 presence 服务器的版本号。
+         它返回的是上游自己的公告 id（现为 10200），与本 fork 的发布节奏无关；
+         一旦大于内置公告 id 就会弹出「发现新版本，请刷新页面更新」，
+         而刷新拿到的仍是本 fork 的内容，于是无限循环且弹窗无法关闭。
+         本 fork 的更新走壳的 ContentManager（version.json + content.zip）。
+    <meta name="rphub-update-api" content="https://rphub-presence.zeabur.app"> -->
     <title>RP Hub</title>
     <!-- GitHub Pages rebuild marker for CSS-only animation update. -->
     <!-- <link rel="icon" href="logo.jpg" type="image/jpeg"> -->

@@ -704,13 +704,27 @@
                 scrolledToBottom.value = element.scrollHeight - element.scrollTop - element.clientHeight < 10;
             };
 
+            /**
+             * 关掉「发现新版本」提示而不刷新。
+             *
+             * 原来这个弹窗只有「立即刷新」一个出口，如果刷新后拿到的内容版本
+             * 依旧低于远端上报的版本号，就会立刻再弹一次 —— 用户被锁死在
+             * 弹窗里，什么都干不了。留一个真正的关闭路径作为兜底。
+             */
+            const dismissRemote = () => {
+                remoteUpdateId.value = null;
+                pendingRemoteUpdateId.value = null;
+                show.value = false;
+                clearTimers();
+            };
+
             window.addEventListener('rphub:update-available', handleRemoteUpdate);
             expose({ check });
             onBeforeUnmount(() => {
                 clearTimers();
                 window.removeEventListener('rphub:update-available', handleRemoteUpdate);
             });
-            return { contentEl, countdown, handleScroll, close, remoteUpdateId, scrolledToBottom, show };
+            return { contentEl, countdown, dismissRemote, handleScroll, close, remoteUpdateId, scrolledToBottom, show };
         },
         template: `
             <modal-shell v-if="show" overlay-class="z-[80] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
@@ -728,7 +742,11 @@
                         <div v-else class="prose prose-sm prose-gray max-w-none">
                             <div class="markdown-body" v-html="renderMarkdown(update.content, 'assistant', true)"></div>
                         </div>
-                        <div class="mt-8 mb-2 flex justify-end">
+                        <div class="mt-8 mb-2 flex justify-end gap-3">
+                            <button v-if="remoteUpdateId" @click="dismissRemote"
+                                class="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-all active:scale-95">
+                                稍后再说
+                            </button>
                             <button @click="close" :disabled="!remoteUpdateId && countdown > 0"
                                 :class="{ 'opacity-50 cursor-not-allowed': !remoteUpdateId && countdown > 0 }"
                                 class="px-10 py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg shadow-sm hover:shadow transition-all active:scale-95">
