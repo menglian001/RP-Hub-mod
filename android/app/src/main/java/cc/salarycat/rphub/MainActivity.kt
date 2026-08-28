@@ -14,6 +14,7 @@ import android.webkit.ConsoleMessage
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
@@ -42,6 +43,9 @@ class MainActivity : AppCompatActivity() {
 
         /** onResume 自动检查更新的最小间隔，避免每次切前台都打一次网络。 */
         private const val AUTO_CHECK_INTERVAL_MS = 10 * 60 * 1000L
+
+        /** 渲染进程崩溃后最多自动重建几次；超过就提示用户而不是无限重试。 */
+        private const val MAX_RENDERER_CRASH_RECOVERY = 3
     }
 
     private lateinit var webView: WebView
@@ -57,6 +61,9 @@ class MainActivity : AppCompatActivity() {
 
     /** 静默检查的失败提示每个进程只弹一次，避免网络长期不通时反复打扰。 */
     private var silentErrorShown = false
+
+    /** 渲染进程崩溃后重建的次数。连续崩溃说明重建也救不回来，不再无限重试。 */
+    private var rendererCrashCount = 0
 
     private val fileChooser = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -132,6 +139,37 @@ class MainActivity : AppCompatActivity() {
         val now = System.currentTimeMillis()
         if (now - lastAutoCheckAt < AUTO_CHECK_INTERVAL_MS) return
         checkUpdate(silent = true)
+    }
+
+    /**
+     * 渲染进程崩溃后重建 WebView。
+     *
+     * 崩掉的 WebView 实例无法复用，必须从容器摘除并 destroy，再建一个新的。
+     * 只重跑 configureWebView（它只往新实例上挂设置，幂等）；
+     * setupBackHandling 不能重跑 —— 那是 addCallback，再调会叠加第二个返回键
+     * 回调。它内部读的是 webView 字段（调用时求值），指向新实例后本来就继续可用。
+     */
+    private fun recreateWebView() {
+        val old = webView
+        container.removeView(old)
+        // 先断开 JS 桥再销毁，避免残留引用
+        try {
+            old.removeJavascriptInterface("RPHubNative")
+        } catch (e: Exception) {
+            Log.w(TAG, "移除 JS 接口失败: ${e.message}")
+        }
+        old.destroy()
+
+        webView = WebView(this)
+        container.addView(
+            webView,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+        configureWebView()
+        webView.loadUrl(HOME_URL)
     }
 
     /**
@@ -219,6 +257,51 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this@MainActivity, "无法打开链接", Toast.LENGTH_SHORT).show()
                     true
                 }
+            }
+
+            /**
+             * 渲染进程死了（几乎总是 OOM：长会话 + 大量图片把 WebView 的堆撑爆）。
+             *
+             * 不重写这个方法、或者重写后返回 false，系统就会把宿主进程一起杀掉 ——
+             * 用户看到的就是「用着用着突然闪退」，没有任何提示。largeHeap 只是把
+             * 天花板抬高，撞上去结果一样。
+             *
+             * 返回 true 表示「崩溃已由 App 处理」，进程得以存活；这里原地换一个
+             * 新的 WebView 重新加载。会话数据在 IndexedDB 里，不受影响。
+             */
+            override fun onRenderProcessGone(
+                view: WebView?,
+                detail: RenderProcessGoneDetail?
+            ): Boolean {
+                val crashed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    detail?.didCrash() ?: false
+                } else {
+                    false
+                }
+                Log.e(TAG, "WebView 渲染进程终止 (didCrash=$crashed)，第 ${rendererCrashCount + 1} 次")
+
+                // 崩掉的那个 WebView 已经不可用了，必须摘掉再销毁，否则新的也起不来
+                if (view !== webView) {
+                    // 不是当前那个（理论上不会发生），只做清理
+                    (view?.parent as? ViewGroup)?.removeView(view)
+                    view?.destroy()
+                    return true
+                }
+
+                rendererCrashCount++
+                if (rendererCrashCount > MAX_RENDERER_CRASH_RECOVERY) {
+                    // 连续崩这么多次，重建也救不回来，如实告知而不是无限闪一个空白页
+                    Toast.makeText(
+                        this@MainActivity,
+                        "页面反复崩溃，请重启应用；若持续发生请清理部分聊天记录或图片",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return true
+                }
+
+                Toast.makeText(this@MainActivity, "页面内存不足已重新加载", Toast.LENGTH_SHORT).show()
+                recreateWebView()
+                return true
             }
         }
 
