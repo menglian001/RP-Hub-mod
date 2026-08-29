@@ -63,6 +63,21 @@ class NativeBridge(
         return json.toString()
     }
 
+    /**
+     * 上次崩溃与内存压力的现场快照。
+     *
+     * 闪退时 Toast 往往来不及显示，甚至整个进程已经被系统杀掉，
+     * 所以现场是落盘的 —— 这里读出来给网页显示，用户可以直接反馈。
+     */
+    @JavascriptInterface
+    fun crashInfo(): String = CrashLog.snapshot(ctx)
+
+    /** 反馈完之后清掉，避免旧记录一直显示。 */
+    @JavascriptInterface
+    fun clearCrashInfo() {
+        CrashLog.clear(ctx)
+    }
+
     @JavascriptInterface
     fun checkUpdate() {
         onCheckUpdate()

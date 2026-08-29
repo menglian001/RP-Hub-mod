@@ -2,6 +2,7 @@ package cc.salarycat.rphub
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -142,6 +143,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * 系统内存紧张时的预警。
+     *
+     * 这是被杀之前唯一的通知机会 —— 等到进程真被 LMK 干掉就什么回调都没有了。
+     * 转告网页侧主动释放缓存，比被动撞 OOM 好。
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        val severe = level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW
+        Log.w(TAG, "onTrimMemory(level=$level, severe=$severe)")
+        CrashLog.recordTrimMemory(applicationContext, level)
+        if (!severe) return
+        // 网页没定义这个函数也没关系，JS 里做了存在性判断
+        runCatching {
+            webView.evaluateJavascript(
+                "window.RPHubOnMemoryPressure && window.RPHubOnMemoryPressure($level);",
+                null
+            )
+        }.onFailure { Log.w(TAG, "通知网页释放内存失败: ${it.message}") }
+    }
+
+    /**
      * 渲染进程崩溃后重建 WebView。
      *
      * 崩掉的 WebView 实例无法复用，必须从容器摘除并 destroy，再建一个新的。
@@ -279,6 +301,14 @@ class MainActivity : AppCompatActivity() {
                     false
                 }
                 Log.e(TAG, "WebView 渲染进程终止 (didCrash=$crashed)，第 ${rendererCrashCount + 1} 次")
+
+                // 落盘留证。闪退时 Toast 往往来不及显示（甚至整个进程已经没了），
+                // 只有写进 SharedPreferences 才能在下次启动时把现场读出来。
+                CrashLog.recordRendererGone(
+                    applicationContext,
+                    didCrash = crashed,
+                    attempt = rendererCrashCount + 1
+                )
 
                 // 崩掉的那个 WebView 已经不可用了，必须摘掉再销毁，否则新的也起不来
                 if (view !== webView) {
