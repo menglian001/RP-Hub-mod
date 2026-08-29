@@ -72,6 +72,10 @@ class NativeBridge(
     @JavascriptInterface
     fun crashInfo(): String = CrashLog.snapshot(ctx)
 
+    /** 是否有值得展示的崩溃记录，网页侧据此决定要不要提示。 */
+    @JavascriptInterface
+    fun hasCrashReport(): Boolean = CrashLog.hasReport(ctx)
+
     /** 反馈完之后清掉，避免旧记录一直显示。 */
     @JavascriptInterface
     fun clearCrashInfo() {

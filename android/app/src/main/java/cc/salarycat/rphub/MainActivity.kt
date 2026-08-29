@@ -90,6 +90,13 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // 必须最先装：没有这个，Java 层任何未捕获异常都会让进程静默消失，
+        // onRenderProcessGone 不触发，Toast 也来不及显示，什么线索都留不下。
+        CrashLog.installGlobalHandler(applicationContext)
+        // 存活标记。上次若没走到 markCleanExit，说明是被系统直接杀掉的
+        // （LMK 或 native 崩溃）—— 那种死法没有任何回调机会，只能这样反推。
+        CrashLog.markStart(applicationContext)
+
         // 全屏：内容画到系统栏底下并隐藏状态栏/导航栏。
         // 旧版只把两条栏染成 #0F172A，网页是浅色的，看起来就是上下各一条黑边。
         enableFullscreen()
@@ -150,7 +157,12 @@ class MainActivity : AppCompatActivity() {
      */
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        val severe = level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW
+        // 只认「前台内存紧张」这两级。RUNNING_* 之外的 UI_HIDDEN(20) /
+        // BACKGROUND(40) / MODERATE(60) 数值更大但只是切后台，
+        // 用 >= 会导致每次切后台都清缓存 —— 白丢命中率。
+        val severe = level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW
+            || level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL
+            || level == ComponentCallbacks2.TRIM_MEMORY_COMPLETE
         Log.w(TAG, "onTrimMemory(level=$level, severe=$severe)")
         CrashLog.recordTrimMemory(applicationContext, level)
         if (!severe) return
@@ -494,6 +506,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // 走到这里说明是正常退出，清掉存活标记，下次启动就不会误报成被杀。
+        // isChangingConfigurations 时进程还活着（只是重建 Activity），不能清。
+        if (!isChangingConfigurations) {
+            CrashLog.markCleanExit(applicationContext)
+        }
         webView.removeJavascriptInterface("RPHubNative")
         super.onDestroy()
     }

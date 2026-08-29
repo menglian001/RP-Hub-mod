@@ -4253,6 +4253,102 @@ const app = createApp({
 
         // 模板直接调用。旧数据的内联 dataUrl 原样返回；外置的先返回空串，
         // 取到之后响应式更新会自动补上。
+        // --- 崩溃诊断 ---
+        // 闪退时 Toast 来不及显示、进程被杀时连回调都没有，所以现场是落盘的。
+        // 这里读出来给用户看，用户可以直接复制反馈 —— 否则记录写了也没人看得到。
+        const crashReport = ref('');
+        const showCrashReport = ref(false);
+
+        const buildCrashReportText = (raw) => {
+            let info;
+            try {
+                info = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            } catch (error) {
+                return String(raw || '');
+            }
+            const lines = [];
+            const push = (label, value) => {
+                if (value === null || value === undefined || value === '') return;
+                lines.push(`${label}: ${value}`);
+            };
+            push('设备', info.device);
+            push('系统', 'Android SDK ' + info.sdk);
+            push('壳版本', info.shell);
+            push('内容版本', info.content);
+            push('Java 堆', `${info.javaHeapUsedMb} / ${info.javaHeapMaxMb} MB`);
+            push('最严重内存警告', info.worstTrimMemory);
+
+            const parse = (value) => {
+                if (!value || value === null) return null;
+                try { return typeof value === 'string' ? JSON.parse(value) : value; }
+                catch (error) { return null; }
+            };
+
+            if (info.fatalCount > 0) {
+                lines.push('', `【Java 层崩溃 ${info.fatalCount} 次】`);
+                const fatal = parse(info.lastFatal);
+                if (fatal) {
+                    push('  类型', fatal.type);
+                    push('  消息', fatal.message);
+                    push('  线程', fatal.thread);
+                    push('  崩溃时堆', `${fatal.javaHeapUsedMb} / ${fatal.javaHeapMaxMb} MB`);
+                    if (fatal.stack) lines.push('  堆栈:', fatal.stack);
+                }
+            }
+            if (info.rendererGoneCount > 0) {
+                lines.push('', `【页面渲染进程崩溃 ${info.rendererGoneCount} 次】`);
+                const gone = parse(info.lastRendererGone);
+                if (gone) {
+                    push('  didCrash', gone.didCrash);
+                    push('  第几次重建', gone.attempt);
+                    push('  崩溃时堆', `${gone.javaHeapUsedMb} / ${gone.javaHeapMaxMb} MB`);
+                }
+            }
+            if (info.dirtyExitCount > 0) {
+                lines.push('', `【被系统直接杀掉 ${info.dirtyExitCount} 次】`);
+                const dirty = parse(info.lastDirtyExit);
+                const trim = dirty && parse(dirty.lastTrim);
+                if (trim) {
+                    push('  被杀前最后一次内存警告', `${trim.name}（当时堆 ${trim.javaHeapUsedMb} MB）`);
+                }
+                lines.push('  说明: 这种情况没有任何回调机会，通常是整机内存不足');
+            }
+            if (!info.fatalCount && !info.rendererGoneCount && !info.dirtyExitCount) {
+                lines.push('', '没有崩溃记录。');
+            }
+            return lines.join('\n');
+        };
+
+        const openCrashReport = () => {
+            const native = window.RPHubNative;
+            if (!native?.crashInfo) {
+                showToast('当前环境没有崩溃诊断（需要 App 内打开）', 'info');
+                return;
+            }
+            try {
+                crashReport.value = buildCrashReportText(native.crashInfo());
+                showCrashReport.value = true;
+            } catch (error) {
+                showToast('读取崩溃诊断失败: ' + error.message, 'error');
+            }
+        };
+
+        const copyCrashReport = async () => {
+            try {
+                await navigator.clipboard.writeText(crashReport.value);
+                showToast('已复制诊断信息', 'success');
+            } catch (error) {
+                showToast('复制失败，请长按选择文本', 'error');
+            }
+        };
+
+        const dismissCrashReport = (clear) => {
+            showCrashReport.value = false;
+            if (clear && window.RPHubNative?.clearCrashInfo) {
+                try { window.RPHubNative.clearCrashInfo(); } catch (error) { /* 忽略 */ }
+            }
+        };
+
         // 原生在 onTrimMemory 时调用（系统杀进程之前唯一的通知机会）。
         // 主动把能放的都放掉：渲染缓存、图片 LRU，以及收缩渲染窗口。
         window.RPHubOnMemoryPressure = (level) => {
@@ -11362,6 +11458,20 @@ const app = createApp({
 
         // Lifecycle
         onMounted(async () => {
+            // 上次闪退过就主动提示 —— 用户不必知道有这么个入口
+            setTimeout(() => {
+                const native = window.RPHubNative;
+                if (!native?.hasCrashReport) return;
+                try {
+                    if (native.hasCrashReport()) {
+                        crashReport.value = buildCrashReportText(native.crashInfo());
+                        showCrashReport.value = true;
+                    }
+                } catch (error) {
+                    console.warn('读取崩溃诊断失败:', error);
+                }
+            }, 2500);
+
             document.addEventListener('fullscreenchange', syncChatFullscreenState);
             document.addEventListener('webkitfullscreenchange', syncChatFullscreenState);
 
@@ -12024,7 +12134,8 @@ const app = createApp({
             isBatchDeleteMode, isSidebarCollapsed, isOnlineNavOpen, toggleOnlineNav, isAdvancedNavOpen, toggleAdvancedNav, selectedCharacterIndices, toggleBatchDeleteMode, toggleCharacterSelection, batchDeleteCharacters,
             handleAvatarUpload, importCharacter,
             createPreset, editPreset, savePreset, deletePreset,
-            renderMarkdown, chatImageSrc, messageUsesWideLayout, parseCot, closeCharacterEditor: () => showCharacterEditor.value = false,
+            renderMarkdown, chatImageSrc, messageUsesWideLayout, parseCot,
+            crashReport, showCrashReport, openCrashReport, copyCrashReport, dismissCrashReport, closeCharacterEditor: () => showCharacterEditor.value = false,
             openExportModal: (type) => {
                 exportType.value = type;
                 selectedExportIndices.value.clear();

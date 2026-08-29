@@ -2031,6 +2031,10 @@
                                             class="px-4 py-2.5 text-sm font-bold text-red-600 bg-white border border-gray-200 rounded-xl shadow-sm hover:bg-red-50 hover:border-red-100 hover:shadow-md active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none">
                                             {{ storageStats.cleaning ? '清理中...' : '清理无用残留（' + formatStorageSize(storageStats.orphanedBytes) + '）' }}
                                         </button>
+                                        <button type="button" @click="openCrashReport"
+                                            class="px-4 py-2.5 text-sm font-bold text-amber-600 bg-white border border-gray-200 rounded-xl shadow-sm hover:bg-amber-50 hover:border-amber-100 hover:shadow-md active:scale-95 transition-all">
+                                            崩溃诊断
+                                        </button>
                                     </div>
                                 </div>
 
@@ -3007,6 +3011,44 @@
             @update:person="tempUserSetup.person = $event" @save="saveUserSetup"></user-setup-modal>
         <action-confirm-modal :show="showConfirmModal" :message="confirmMessage"
             @confirm="handleConfirm" @cancel="handleCancel"></action-confirm-modal>
+
+        <!-- Crash Report Modal -->
+        <!-- 闪退时 Toast 来不及显示、进程被杀时连回调都没有，现场是落盘的。
+             这里把它读出来给用户看，用户可以直接复制反馈。 -->
+        <div v-if="showCrashReport"
+            class="fixed inset-0 z-[75] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
+            <div class="bg-white rounded-xl border border-gray-200 w-full max-w-md flex flex-col shadow-2xl max-h-[85vh]">
+                <div class="p-5 border-b border-gray-100 flex items-center gap-3 flex-shrink-0">
+                    <div class="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center flex-shrink-0">
+                        <svg class="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-semibold text-gray-900">上次异常退出</h3>
+                        <p class="text-xs text-gray-400 mt-0.5">把下面的信息发给开发者即可定位</p>
+                    </div>
+                </div>
+                <div class="p-5 overflow-y-auto">
+                    <pre class="text-[11px] leading-relaxed text-gray-700 whitespace-pre-wrap break-all font-mono bg-gray-50 rounded-lg p-3 border border-gray-100">{{ crashReport }}</pre>
+                </div>
+                <div class="bg-gray-50 px-5 py-3 flex justify-end gap-2 rounded-b-xl flex-shrink-0">
+                    <button @click="dismissCrashReport(true)" type="button"
+                        class="px-4 py-2 rounded-lg bg-white border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-100 transition-colors">
+                        清除记录
+                    </button>
+                    <button @click="dismissCrashReport(false)" type="button"
+                        class="px-4 py-2 rounded-lg bg-white border border-gray-200 text-gray-600 text-sm font-medium hover:bg-gray-100 transition-colors">
+                        稍后再看
+                    </button>
+                    <button @click="copyCrashReport" type="button"
+                        class="px-4 py-2 rounded-lg bg-primary-500 text-white text-sm font-medium hover:bg-primary-600 transition-colors">
+                        复制
+                    </button>
+                </div>
+            </div>
+        </div>
 
         <!-- Announcement Modal -->
         <div v-if="announcementDialog.visible"
