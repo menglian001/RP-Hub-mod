@@ -270,7 +270,10 @@
         return { snapshot, pending };
     };
 
-    // 读回来：imageRef -> dataUrl。旧数据只有内联 dataUrl，原样可用。
+    // 读回来：imageRef -> dataUrl，**全量**还原。
+    // 只给导出用 —— 存档必须是完整数据。日常读会话不要走这里：
+    // 一张 1600x1200 的 base64 是 1.25MB，50 张图的会话光字符串就 62MB，
+    // 而界面同时只渲染最后 20 条，其余全是白占。
     const hydrateChatImages = async (history) => {
         const messages = Array.isArray(history) ? history : [];
         return Promise.all(messages.map(async (message) => {
@@ -323,11 +326,18 @@
 
     const setChatHistory = (scopeId, history) => prepareChatHistoryWrite(scopeId, history)();
 
-    const getChatHistory = async (scopeId) => {
-        const stored = await dbGetWithLegacy(
-            scopedStorageKey('chat', scopeId),
-            legacyScopedStorageKey('chat', scopeId)
-        );
+    // 日常读会话：**不**还原图片，消息里留着 imageRef，由界面按需取。
+    // 急切还原会让整份历史的 base64 常驻内存，而真正致命的是它们被
+    // <img> 解码成位图：1600x1200 一张就是 7.3MB（ARGB_8888），
+    // 20 张 = 146MB，且位图在图形内存池里，largeHeap 也管不到。
+    const getChatHistory = async (scopeId) => dbGetWithLegacy(
+        scopedStorageKey('chat', scopeId),
+        legacyScopedStorageKey('chat', scopeId)
+    );
+
+    // 导出用：需要完整数据，图片必须还原成内联 dataUrl。
+    const getChatHistoryWithImages = async (scopeId) => {
+        const stored = await getChatHistory(scopeId);
         if (!Array.isArray(stored)) return stored;
         return hydrateChatImages(stored);
     };
@@ -372,6 +382,8 @@
         cloneForStorage,
         deleteScopedStoredValue: (name, id) => dbDeleteWithLegacy(scopedStorageKey(name, id), legacyScopedStorageKey(name, id)),
         getChatHistory,
+        getChatHistoryWithImages,
+        getChatImage,
         setChatHistory,
         prepareChatHistoryWrite,
         pruneChatImages,

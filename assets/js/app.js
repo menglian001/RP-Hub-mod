@@ -123,6 +123,8 @@ const {
     deleteStorageKeys,
     deleteStoredValue,
     getChatHistory,
+    getChatHistoryWithImages,
+    getChatImage,
     getLegacyDb,
     getMainDb,
     getScopedStoredValue,
@@ -4208,6 +4210,79 @@ const app = createApp({
             && chatHistory.value[chatHistory.value.length - 1] === msg
         );
         const renderOptionsFor = (msg) => (isStreamingMessage(msg) ? { cache: false } : undefined);
+
+        // 按需取聊天图片。getChatHistory 不再急切还原 dataUrl，因为解码后的
+        // 位图才是内存杀手（1600x1200 = 7.3MB ARGB_8888，20 张就 146MB，
+        // 且位图在图形内存池里，largeHeap 管不到）。
+        //
+        // 这里只为「当前真的要显示」的图片取 dataUrl，并用 LRU 限制同时驻留
+        // 的张数；被挤出的图片 src 变回空，WebView 就会回收它的位图。
+        const CHAT_IMAGE_LRU_LIMIT = 12;
+        const chatImageSources = ref(new Map());
+        const chatImageLruOrder = [];
+        const chatImageLoading = new Set();
+
+        const touchChatImageLru = (ref_) => {
+            const at = chatImageLruOrder.indexOf(ref_);
+            if (at !== -1) chatImageLruOrder.splice(at, 1);
+            chatImageLruOrder.push(ref_);
+            while (chatImageLruOrder.length > CHAT_IMAGE_LRU_LIMIT) {
+                const evicted = chatImageLruOrder.shift();
+                chatImageSources.value.delete(evicted);
+            }
+        };
+
+        const loadChatImage = async (imageRef) => {
+            if (chatImageLoading.has(imageRef)) return;
+            chatImageLoading.add(imageRef);
+            try {
+                const dataUrl = await getChatImage(imageRef);
+                if (typeof dataUrl === 'string' && dataUrl) {
+                    // 触发响应式更新：Map 原地改不会被 Vue 侦测到
+                    const next = new Map(chatImageSources.value);
+                    next.set(imageRef, dataUrl);
+                    chatImageSources.value = next;
+                    touchChatImageLru(imageRef);
+                }
+            } catch (error) {
+                console.warn('Failed to load chat image:', error);
+            } finally {
+                chatImageLoading.delete(imageRef);
+            }
+        };
+
+        // 模板直接调用。旧数据的内联 dataUrl 原样返回；外置的先返回空串，
+        // 取到之后响应式更新会自动补上。
+        // 原生在 onTrimMemory 时调用（系统杀进程之前唯一的通知机会）。
+        // 主动把能放的都放掉：渲染缓存、图片 LRU，以及收缩渲染窗口。
+        window.RPHubOnMemoryPressure = (level) => {
+            console.warn('[RPHub] 收到内存压力信号 level=' + level + '，释放缓存');
+            try {
+                clearMessageRenderCaches();
+                chatImageSources.value = new Map();
+                chatImageLruOrder.length = 0;
+                // 收紧渲染窗口，减少同时解码的位图
+                if (chatRenderLimit.value > CHAT_RENDER_INITIAL_LIMIT) {
+                    chatRenderLimit.value = CHAT_RENDER_INITIAL_LIMIT;
+                }
+            } catch (error) {
+                console.warn('[RPHub] 释放缓存失败:', error);
+            }
+        };
+
+        const chatImageSrc = (attachment) => {
+            if (!attachment || typeof attachment !== 'object') return '';
+            if (typeof attachment.dataUrl === 'string' && attachment.dataUrl) return attachment.dataUrl;
+            const imageRef = attachment.imageRef;
+            if (typeof imageRef !== 'string' || !imageRef) return '';
+            const cached = chatImageSources.value.get(imageRef);
+            if (cached) {
+                touchChatImageLru(imageRef);
+                return cached;
+            }
+            loadChatImage(imageRef);
+            return '';
+        };
 
         const messageUsesHtmlFrame = (msg) => {
             if (!msg || !msg.content) return false;
@@ -11116,10 +11191,10 @@ const app = createApp({
                     } else if (char.uuid) {
                         // 走 getChatHistory 而不是裸读：图片已外置成 imageRef，
                         // 导出必须还原回 dataUrl，否则存档里的图片全丢。
-                        messages = await getChatHistory(getStoryBranchScopeId(char.uuid, branch.id));
+                        messages = await getChatHistoryWithImages(getStoryBranchScopeId(char.uuid, branch.id));
                     }
                     if (messages === undefined && branch.id === STORY_BRANCH_MAIN_ID) {
-                        messages = await getChatHistory(index);
+                        messages = await getChatHistoryWithImages(index);
                     }
                     return {
                         branchId: branch.id,
@@ -11949,7 +12024,7 @@ const app = createApp({
             isBatchDeleteMode, isSidebarCollapsed, isOnlineNavOpen, toggleOnlineNav, isAdvancedNavOpen, toggleAdvancedNav, selectedCharacterIndices, toggleBatchDeleteMode, toggleCharacterSelection, batchDeleteCharacters,
             handleAvatarUpload, importCharacter,
             createPreset, editPreset, savePreset, deletePreset,
-            renderMarkdown, messageUsesWideLayout, parseCot, closeCharacterEditor: () => showCharacterEditor.value = false,
+            renderMarkdown, chatImageSrc, messageUsesWideLayout, parseCot, closeCharacterEditor: () => showCharacterEditor.value = false,
             openExportModal: (type) => {
                 exportType.value = type;
                 selectedExportIndices.value.clear();

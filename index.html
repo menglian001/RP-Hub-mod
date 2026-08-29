@@ -467,7 +467,8 @@
                                             <div v-if="msg.role === 'user' && Array.isArray(msg.imageAttachments) && msg.imageAttachments.length"
                                                 :class="['grid gap-1.5 p-1', msg.imageAttachments.length === 1 ? 'grid-cols-1 w-fit' : 'grid-cols-2 w-[min(24rem,78vw)]']">
                                                 <img v-for="(image, imageIndex) in msg.imageAttachments"
-                                                    :key="`${index}-image-${imageIndex}`" :src="image.dataUrl"
+                                                    :key="`${index}-image-${imageIndex}`" :src="chatImageSrc(image)"
+                                                    loading="lazy" decoding="async"
                                                     :class="['block rounded-xl bg-white', msg.imageAttachments.length === 1 ? 'justify-self-start w-auto max-w-[min(24rem,78vw)] h-auto max-h-[26rem] object-contain' : ('w-full ' + (msg.imageAttachments.length === 3 && imageIndex === 0 ? 'col-span-2 h-48 object-cover' : 'h-36 object-cover'))]"
                                                     :alt="`用户发送的图片 ${imageIndex + 1}`">
                                             </div>
